@@ -204,6 +204,18 @@ class FileTracker:
         except Exception as e:
             self.logger.error(f"Error calculating file hash for {file_path}: {e}")
             return ""
+            
+    def calculate_file_hash(self, file_path: str) -> str:
+        """
+        Calculate SHA-256 hash of file for change detection.
+        
+        Args:
+            file_path: Path to the file as string
+            
+        Returns:
+            SHA-256 hash of the file
+        """
+        return self._calculate_file_hash(Path(file_path))
     
     def _get_file_info(self, file_path: Path) -> Optional[FileInfo]:
         """
@@ -243,6 +255,120 @@ class FileTracker:
         except Exception as e:
             self.logger.error(f"Error getting file info for {file_path}: {e}")
             return None
+            
+    def get_files_batch(self, file_paths: List[str]) -> Dict[str, FileInfo]:
+        """
+        Get file information for multiple files in a single database query.
+        
+        Args:
+            file_paths: List of file paths to look up
+            
+        Returns:
+            Dictionary mapping file paths to FileInfo objects
+        """
+        if not file_paths:
+            return {}
+            
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                
+                # Create placeholders for the IN clause
+                placeholders = ','.join(['?' for _ in file_paths])
+                query = f"SELECT * FROM processed_files WHERE file_path IN ({placeholders})"
+                
+                cursor = conn.execute(query, file_paths)
+                rows = cursor.fetchall()
+                
+                result = {}
+                for row in rows:
+                    file_info = FileInfo(
+                        file_path=row['file_path'],
+                        file_hash=row['file_hash'],
+                        file_size=row['file_size'],
+                        file_modified_time=row['file_modified_time'],
+                        processing_status=ProcessingStatus(row['processing_status']),
+                        processing_start_time=row['processing_start_time'],
+                        processing_end_time=row['processing_end_time'],
+                        processing_duration=row['processing_duration'],
+                        error_message=row['error_message'],
+                        created_at=row['created_at'],
+                        updated_at=row['updated_at']
+                    )
+                    result[file_info.file_path] = file_info
+                    
+                return result
+                
+        except Exception as e:
+            self.logger.error(f"Error getting batch file info: {e}")
+            return {}
+            
+    def add_file(self, file_info: FileInfo) -> bool:
+        """
+        Add a new file to the tracking database.
+        
+        Args:
+            file_info: FileInfo object containing file details
+            
+        Returns:
+            True if file was added successfully, False otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    INSERT INTO processed_files (
+                        file_path, file_hash, file_size, file_modified_time,
+                        processing_status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    file_info.file_path,
+                    file_info.file_hash,
+                    file_info.file_size,
+                    file_info.file_modified_time,
+                    file_info.processing_status.value,
+                    file_info.created_at,
+                    file_info.created_at  # updated_at same as created_at for new files
+                ))
+                conn.commit()
+                self.logger.info(f"Added file to tracking: {file_info.file_path}")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Error adding file {file_info.file_path}: {e}")
+            return False
+            
+    def update_file(self, file_info: FileInfo) -> bool:
+        """
+        Update an existing file in the tracking database.
+        
+        Args:
+            file_info: FileInfo object containing updated file details
+            
+        Returns:
+            True if file was updated successfully, False otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    UPDATE processed_files SET
+                        file_hash = ?, file_size = ?, file_modified_time = ?,
+                        processing_status = ?, updated_at = ?
+                    WHERE file_path = ?
+                """, (
+                    file_info.file_hash,
+                    file_info.file_size,
+                    file_info.file_modified_time,
+                    file_info.processing_status.value,
+                    datetime.now().timestamp(),
+                    file_info.file_path
+                ))
+                conn.commit()
+                self.logger.info(f"Updated file in tracking: {file_info.file_path}")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Error updating file {file_info.file_path}: {e}")
+            return False
     
     def should_process_file(self, file_path: Path) -> bool:
         """

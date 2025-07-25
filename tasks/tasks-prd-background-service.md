@@ -12,13 +12,13 @@ Based on PRD: `prd-background-service.md`
   - [x] 1.5 Add service health monitoring and crash recovery mechanisms
   - [x] 1.6 Integrate default Python logging system with background service
 
-- [ ] 2.0 Directory Monitoring and File Detection
-  - [ ] 2.1 Implement recursive directory scanner with configurable scan intervals
-  - [ ] 2.2 Add video file detection and filtering by size, type, and modification timestamp
-  - [ ] 2.3 Create efficient file change detection algorithm using modification timestamps
-  - [ ] 2.4 Implement new file detection logic to identify unprocessed video files
-  - [ ] 2.5 Add file validation to ensure only valid video files are processed
-  - [ ] 2.6 Create scan progress tracking and reporting system
+- [x] 2.0 Directory Monitoring and File Detection
+  - [x] 2.1 Implement recursive directory scanner with configurable scan intervals
+  - [x] 2.2 Add video file detection and filtering by size, type, and modification timestamp
+  - [x] 2.3 Create efficient file change detection algorithm using modification timestamps
+  - [x] 2.4 Implement new file detection logic to identify unprocessed video files
+  - [x] 2.5 Add file validation to ensure only valid video files are processed
+  - [x] 2.6 Create scan progress tracking and reporting system
 
 - [ ] 3.0 GUI Integration and Service Control
   - [ ] 3.1 Create service control panel with start/stop/restart buttons

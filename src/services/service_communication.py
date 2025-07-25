@@ -607,21 +607,179 @@ class ServiceCommunicationManager:
     def send_scan_session(self, session_id: int, directories_scanned: List[str],
                          files_found: int, files_processed: int, files_skipped: int,
                          files_failed: int, scan_duration: float) -> bool:
-        """Send a scan session update to the GUI."""
-        message = ServiceMessage(
-            message_type=MessageType.SCAN_COMPLETED,
-            timestamp=time.time(),
-            data={
-                'session_id': session_id,
-                'directories_scanned': directories_scanned,
-                'files_found': files_found,
-                'files_processed': files_processed,
-                'files_skipped': files_skipped,
-                'files_failed': files_failed,
-                'scan_duration': scan_duration
-            }
-        )
-        return self.send_to_gui(message)
+        """
+        Send scan session update to GUI.
+        
+        Args:
+            session_id: ID of the scan session
+            directories_scanned: List of directories that were scanned
+            files_found: Number of files found
+            files_processed: Number of files processed
+            files_skipped: Number of files skipped
+            files_failed: Number of files that failed
+            scan_duration: Duration of the scan in seconds
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        try:
+            message = ScanSessionMessage(
+                message_type=MessageType.SCAN_STARTED,
+                timestamp=time.time(),
+                data={
+                    'session_id': session_id,
+                    'directories_scanned': directories_scanned,
+                    'files_found': files_found,
+                    'files_processed': files_processed,
+                    'files_skipped': files_skipped,
+                    'files_failed': files_failed,
+                    'scan_duration': scan_duration
+                },
+                session_id=session_id,
+                directories_scanned=directories_scanned,
+                files_found=files_found,
+                files_processed=files_processed,
+                files_skipped=files_skipped,
+                files_failed=files_failed,
+                scan_duration=scan_duration,
+                message_id=self._generate_message_id()
+            )
+            
+            return self.send_to_gui(message)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending scan session message: {e}")
+            return False
+            
+    def send_scan_started(self, scan_id: str, directories: List[str], timestamp: datetime) -> bool:
+        """
+        Send scan started notification to GUI.
+        
+        Args:
+            scan_id: ID of the scan
+            directories: List of directories being scanned
+            timestamp: When the scan started
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        try:
+            message = ServiceMessage(
+                message_type=MessageType.SCAN_STARTED,
+                timestamp=timestamp.timestamp(),
+                data={
+                    'scan_id': scan_id,
+                    'directories': directories,
+                    'timestamp': timestamp.isoformat()
+                },
+                message_id=self._generate_message_id()
+            )
+            
+            return self.send_to_gui(message)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending scan started message: {e}")
+            return False
+            
+    def send_scan_progress(self, scan_id: str, **kwargs) -> bool:
+        """
+        Send scan progress update to GUI.
+        
+        Args:
+            scan_id: ID of the scan
+            **kwargs: Progress data (total_files, new_files, modified_files, etc.)
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        try:
+            message = ServiceMessage(
+                message_type=MessageType.PROGRESS_UPDATE,
+                timestamp=time.time(),
+                data={
+                    'scan_id': scan_id,
+                    'progress_type': 'scan',
+                    **kwargs
+                },
+                message_id=self._generate_message_id()
+            )
+            
+            return self.send_to_gui(message)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending scan progress message: {e}")
+            return False
+            
+    def send_scan_completed(self, scan_id: str, total_files: int, new_files: int,
+                          modified_files: int, unchanged_files: int, scan_duration: float,
+                          errors: List[str] = None) -> bool:
+        """
+        Send scan completed notification to GUI.
+        
+        Args:
+            scan_id: ID of the scan
+            total_files: Total number of files found
+            new_files: Number of new files
+            modified_files: Number of modified files
+            unchanged_files: Number of unchanged files
+            scan_duration: Duration of the scan in seconds
+            errors: List of errors that occurred during scan
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        try:
+            message = ServiceMessage(
+                message_type=MessageType.SCAN_COMPLETED,
+                timestamp=time.time(),
+                data={
+                    'scan_id': scan_id,
+                    'total_files': total_files,
+                    'new_files': new_files,
+                    'modified_files': modified_files,
+                    'unchanged_files': unchanged_files,
+                    'scan_duration': scan_duration,
+                    'errors': errors or []
+                },
+                message_id=self._generate_message_id()
+            )
+            
+            return self.send_to_gui(message)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending scan completed message: {e}")
+            return False
+            
+    def send_scan_error(self, scan_id: str, error_message: str, scan_duration: float) -> bool:
+        """
+        Send scan error notification to GUI.
+        
+        Args:
+            scan_id: ID of the scan
+            error_message: Error message
+            scan_duration: Duration of the scan before error
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        try:
+            message = ServiceMessage(
+                message_type=MessageType.ERROR_OCCURRED,
+                timestamp=time.time(),
+                data={
+                    'scan_id': scan_id,
+                    'error_type': 'scan_error',
+                    'error_message': error_message,
+                    'scan_duration': scan_duration
+                },
+                message_id=self._generate_message_id()
+            )
+            
+            return self.send_to_gui(message)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending scan error message: {e}")
+            return False
     
     def send_user_command(self, command: UserCommand, parameters: Dict[str, Any] = None) -> bool:
         """Send a user command to the service."""
