@@ -1,817 +1,445 @@
 """
-Service-GUI Communication System
-
-This module provides a communication bridge between the background service
-and the GUI, enabling real-time status updates, progress tracking, and
-user control.
+Service Communication System for Background Service.
+Provides communication infrastructure for service components, enabling real-time status updates, progress tracking, and
+command processing between different service modules.
 """
 
-import threading
 import queue
+import threading
 import time
-import json
-from typing import Dict, Any, Optional, Callable, List
-from dataclasses import dataclass, asdict
-from datetime import datetime
+from typing import Optional, Dict, Any, Callable, List
+from dataclasses import dataclass, field
 from enum import Enum
+import json
+from datetime import datetime
 
-from services.background_service import ServiceState, ServiceStatus
-from services.file_tracker import ProcessingStatus, OperationType
 from logging_system.subtitle_logger import SubtitleLogger
 
-
 class MessageType(Enum):
-    """Types of messages for service-GUI communication."""
+    """Types of messages for service communication."""
     STATUS_UPDATE = "status_update"
     PROGRESS_UPDATE = "progress_update"
     FILE_PROCESSED = "file_processed"
-    FILE_FAILED = "file_failed"
-    SCAN_STARTED = "scan_started"
-    SCAN_COMPLETED = "scan_completed"
-    ERROR_OCCURRED = "error_occurred"
-    SERVICE_STATE_CHANGE = "service_state_change"
+    SCAN_UPDATE = "scan_update"
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+    COMMAND = "command"
+    HEALTH_UPDATE = "health_update"
     STATISTICS_UPDATE = "statistics_update"
-    CONFIGURATION_UPDATE = "configuration_update"
-    USER_COMMAND = "user_command"
-    COMMAND_RESPONSE = "command_response"
-
 
 class UserCommand(Enum):
     """User commands that can be sent to the service."""
     START_SERVICE = "start_service"
     STOP_SERVICE = "stop_service"
+    RESTART_SERVICE = "restart_service"
     PAUSE_SERVICE = "pause_service"
     RESUME_SERVICE = "resume_service"
-    RESTART_SERVICE = "restart_service"
+    SCAN_NOW = "scan_now"
     GET_STATUS = "get_status"
     GET_STATISTICS = "get_statistics"
+    CLEAR_STATISTICS = "clear_statistics"
     UPDATE_CONFIG = "update_config"
-    FORCE_SCAN = "force_scan"
-    CLEANUP_DATABASE = "cleanup_database"
-
 
 @dataclass
 class ServiceMessage:
-    """Base message structure for service-GUI communication."""
+    """Base message structure for service communication."""
     message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    message_id: Optional[str] = None
-
+    timestamp: datetime = field(default_factory=datetime.now)
+    message_id: str = field(default_factory=lambda: f"msg_{int(time.time() * 1000)}")
+    source: str = ""
+    target: str = ""
+    data: Dict[str, Any] = field(default_factory=dict)
+    priority: int = 0  # 0=low, 1=normal, 2=high, 3=urgent
 
 @dataclass
-class StatusUpdateMessage:
-    """Status update message with service status information."""
-    message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    service_status: ServiceStatus
-    message_id: Optional[str] = None
-
-
-@dataclass
-class ProgressUpdateMessage:
-    """Progress update message for file processing."""
-    message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    current_file: str
-    total_files: int
-    processed_files: int
-    failed_files: int
-    current_operation: str
-    progress_percentage: float
-    message_id: Optional[str] = None
-
+class StatusMessage(ServiceMessage):
+    """Status update message."""
+    service_status: str = ""
+    service_state: str = ""
+    uptime_seconds: int = 0
+    last_scan: Optional[str] = None
+    is_scanning: bool = False
+    is_processing: bool = False
 
 @dataclass
-class FileProcessedMessage:
-    """Message when a file has been processed."""
-    message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    file_path: str
-    processing_status: ProcessingStatus
-    processing_duration: float
-    subtitle_operations: List[Dict[str, Any]]
+class ProgressMessage(ServiceMessage):
+    """Progress update message."""
+    current_file: str = ""
+    progress_percent: float = 0.0
+    current_step: str = ""
+    total_files: int = 0
+    processed_files: int = 0
+    remaining_files: int = 0
+
+@dataclass
+class FileProcessedMessage(ServiceMessage):
+    """File processed notification message."""
+    file_path: str = ""
+    processing_result: str = ""
+    processing_time: float = 0.0
+    subtitle_found: bool = False
+    subtitle_downloaded: bool = False
+    subtitle_translated: bool = False
     error_message: Optional[str] = None
-    message_id: Optional[str] = None
-
 
 @dataclass
-class ScanSessionMessage:
-    """Message for scan session updates."""
-    message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    session_id: int
-    directories_scanned: List[str]
-    files_found: int
-    files_processed: int
-    files_skipped: int
-    files_failed: int
-    scan_duration: float
-    message_id: Optional[str] = None
-
+class ScanUpdateMessage(ServiceMessage):
+    """Scan session update message."""
+    scan_session_id: str = ""
+    scan_type: str = ""  # "full", "incremental", "manual"
+    total_files_found: int = 0
+    new_files_found: int = 0
+    modified_files_found: int = 0
+    unchanged_files: int = 0
+    scan_duration: float = 0.0
+    scan_status: str = ""  # "running", "completed", "failed"
 
 @dataclass
-class UserCommandMessage:
-    """Message for user commands."""
-    message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    command: UserCommand
-    parameters: Dict[str, Any]
-    message_id: Optional[str] = None
-
+class ErrorMessage(ServiceMessage):
+    """Error notification message."""
+    error_type: str = ""
+    error_message: str = ""
+    error_details: Optional[str] = None
+    stack_trace: Optional[str] = None
+    retry_count: int = 0
+    max_retries: int = 3
 
 @dataclass
-class CommandResponseMessage:
-    """Response to user commands."""
-    message_type: MessageType
-    timestamp: float
-    data: Dict[str, Any]
-    original_command: UserCommand
-    success: bool
-    response_data: Dict[str, Any]
-    error_message: Optional[str] = None
-    message_id: Optional[str] = None
-
+class CommandMessage(ServiceMessage):
+    """Command message for service control."""
+    command: UserCommand = UserCommand.GET_STATUS
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    response_required: bool = True
 
 class ServiceCommunicationManager:
     """
-    Manages communication between background service and GUI.
-    
-    Provides a thread-safe message passing system with callbacks
-    for real-time updates and user control.
+    Manages communication between background service components.
+    Provides message passing, status updates, and command processing.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Dict[str, Any], logger: Optional[SubtitleLogger] = None):
         """
         Initialize the communication manager.
         
         Args:
-            config: Configuration dictionary for logging and other settings.
+            config: Configuration dictionary
+            logger: Logger instance
         """
-        self.config = config or {}
-        self.logger = SubtitleLogger(self.config)
+        self.config = config
+        self.logger = logger or SubtitleLogger(config)
         
         # Message queues
-        self._gui_to_service_queue = queue.Queue()
-        self._service_to_gui_queue = queue.Queue()
+        self._service_queue = queue.Queue()
+        self._command_queue = queue.Queue()
         
-        # Callback registries
-        self._status_callbacks: List[Callable[[ServiceStatus], None]] = []
-        self._progress_callbacks: List[Callable[[ProgressUpdateMessage], None]] = []
-        self._file_callbacks: List[Callable[[FileProcessedMessage], None]] = []
-        self._scan_callbacks: List[Callable[[ScanSessionMessage], None]] = []
-        self._error_callbacks: List[Callable[[ServiceMessage], None]] = []
-        self._command_callbacks: List[Callable[[UserCommandMessage], Callable[[bool, Dict[str, Any], Optional[str]], None]]] = []
+        # Message processors
+        self._message_processors: Dict[MessageType, List[Callable]] = {}
+        self._command_handlers: Dict[UserCommand, Callable] = {}
         
-        # Communication threads
-        self._gui_thread: Optional[threading.Thread] = None
+        # Communication state
+        self._is_running = False
         self._service_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
+        self._command_thread: Optional[threading.Thread] = None
         
-        # Thread safety
-        self._lock = threading.RLock()
+        # Statistics
+        self._messages_sent = 0
+        self._messages_received = 0
+        self._commands_processed = 0
+        self._errors_count = 0
         
-        # Message ID counter
-        self._message_id_counter = 0
-        
-        self.logger.info("Service communication manager initialized")
+        # Initialize
+        self._setup_default_handlers()
     
-    def start(self) -> bool:
-        """
-        Start the communication manager.
+    def start(self) -> None:
+        """Start the communication manager."""
+        if self._is_running:
+            self.logger.warning("Communication manager already running")
+            return
         
-        Returns:
-            True if started successfully, False otherwise
-        """
-        try:
-            with self._lock:
-                if self._gui_thread is not None and self._gui_thread.is_alive():
-                    self.logger.warning("Communication manager already running")
-                    return True
-                
-                self.logger.info("Starting service communication manager...")
-                self._stop_event.clear()
-                
-                # Start GUI message processing thread
-                self._gui_thread = threading.Thread(
-                    target=self._gui_message_processor,
-                    name="ServiceComm-GUI",
-                    daemon=True
-                )
-                self._gui_thread.start()
-                
-                # Start service message processing thread
-                self._service_thread = threading.Thread(
-                    target=self._service_message_processor,
-                    name="ServiceComm-Service",
-                    daemon=True
-                )
-                self._service_thread.start()
-                
-                self.logger.info("Service communication manager started successfully")
-                return True
-                
-        except Exception as e:
-            self.logger.error(f"Failed to start communication manager: {e}")
-            return False
-    
-    def stop(self) -> bool:
-        """
-        Stop the communication manager.
+        self._is_running = True
         
-        Returns:
-            True if stopped successfully, False otherwise
-        """
-        try:
-            with self._lock:
-                self.logger.info("Stopping service communication manager...")
-                self._stop_event.set()
-                
-                # Wait for threads to finish
-                if self._gui_thread and self._gui_thread.is_alive():
-                    self._gui_thread.join(timeout=5.0)
-                
-                if self._service_thread and self._service_thread.is_alive():
-                    self._service_thread.join(timeout=5.0)
-                
-                self.logger.info("Service communication manager stopped successfully")
-                return True
-                
-        except Exception as e:
-            self.logger.error(f"Error stopping communication manager: {e}")
-            return False
+        # Start service message processing thread
+        self._service_thread = threading.Thread(
+            target=self._service_message_processor,
+            name="ServiceComm-Service",
+            daemon=True
+        )
+        self._service_thread.start()
+        
+        # Start command processing thread
+        self._command_thread = threading.Thread(
+            target=self._command_processor,
+            name="ServiceComm-Command",
+            daemon=True
+        )
+        self._command_thread.start()
+        
+        self.logger.info("Service communication manager started")
     
-    def _generate_message_id(self) -> str:
-        """Generate a unique message ID."""
-        with self._lock:
-            self._message_id_counter += 1
-            return f"msg_{self._message_id_counter}_{int(time.time())}"
+    def stop(self) -> None:
+        """Stop the communication manager."""
+        if not self._is_running:
+            return
+        
+        self._is_running = False
+        
+        # Stop service thread
+        if self._service_thread and self._service_thread.is_alive():
+            self._service_thread.join(timeout=5.0)
+        
+        # Stop command thread
+        if self._command_thread and self._command_thread.is_alive():
+            self._command_thread.join(timeout=5.0)
+        
+        self.logger.info("Service communication manager stopped")
     
-    def send_to_gui(self, message: ServiceMessage) -> bool:
+    def send_message(self, message: ServiceMessage) -> bool:
         """
-        Send a message from service to GUI.
+        Send a message to the service queue.
         
         Args:
             message: Message to send
             
         Returns:
-            True if sent successfully, False otherwise
+            True if message was sent successfully
         """
         try:
-            if not message.message_id:
-                message.message_id = self._generate_message_id()
-            
-            self._service_to_gui_queue.put(message, timeout=1.0)
-            self.logger.debug(f"Sent message to GUI: {message.message_type.value}")
+            self._service_queue.put(message, timeout=1.0)
+            self._messages_sent += 1
+            self.logger.debug(f"Sent message: {message.message_type.value}")
             return True
-            
-        except queue.Full:
-            self.logger.warning("GUI message queue full, dropping message")
-            return False
-        except Exception as e:
-            self.logger.error(f"Error sending message to GUI: {e}")
-            return False
-    
-    def send_to_service(self, message: ServiceMessage) -> bool:
-        """
-        Send a message from GUI to service.
-        
-        Args:
-            message: Message to send
-            
-        Returns:
-            True if sent successfully, False otherwise
-        """
-        try:
-            if not message.message_id:
-                message.message_id = self._generate_message_id()
-            
-            self._gui_to_service_queue.put(message, timeout=1.0)
-            self.logger.debug(f"Sent message to service: {message.message_type.value}")
-            return True
-            
         except queue.Full:
             self.logger.warning("Service message queue full, dropping message")
             return False
         except Exception as e:
-            self.logger.error(f"Error sending message to service: {e}")
+            self.logger.error(f"Error sending message: {e}")
+            self._errors_count += 1
             return False
     
-    def _gui_message_processor(self) -> None:
-        """Process messages from service to GUI."""
-        self.logger.info("GUI message processor started")
+    def send_command(self, command: UserCommand, parameters: Dict[str, Any] = None) -> bool:
+        """
+        Send a command to the service.
         
+        Args:
+            command: Command to send
+            parameters: Command parameters
+            
+        Returns:
+            True if command was sent successfully
+        """
         try:
-            while not self._stop_event.is_set():
-                try:
-                    # Get message with timeout
-                    message = self._service_to_gui_queue.get(timeout=1.0)
-                    
-                    # Process message based on type
-                    self._process_gui_message(message)
-                    
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    self.logger.error(f"Error processing GUI message: {e}")
-                    
+            message = CommandMessage(
+                message_type=MessageType.COMMAND,
+                command=command,
+                parameters=parameters or {},
+                source="external",
+                target="service"
+            )
+            self._command_queue.put(message, timeout=1.0)
+            self.logger.debug(f"Sent command: {command.value}")
+            return True
+        except queue.Full:
+            self.logger.warning("Command queue full, dropping command")
+            return False
         except Exception as e:
-            self.logger.error(f"GUI message processor error: {e}")
-        finally:
-            self.logger.info("GUI message processor stopped")
+            self.logger.error(f"Error sending command: {e}")
+            self._errors_count += 1
+            return False
+    
+    def register_message_processor(self, message_type: MessageType, processor: Callable) -> None:
+        """Register a message processor for a specific message type."""
+        if message_type not in self._message_processors:
+            self._message_processors[message_type] = []
+        self._message_processors[message_type].append(processor)
+        self.logger.debug(f"Registered processor for {message_type.value}")
+    
+    def register_command_handler(self, command: UserCommand, handler: Callable) -> None:
+        """Register a command handler for a specific command."""
+        self._command_handlers[command] = handler
+        self.logger.debug(f"Registered handler for {command.value}")
     
     def _service_message_processor(self) -> None:
-        """Process messages from GUI to service."""
+        """Process messages from service queue."""
         self.logger.info("Service message processor started")
         
-        try:
-            while not self._stop_event.is_set():
-                try:
-                    # Get message with timeout
-                    message = self._gui_to_service_queue.get(timeout=1.0)
-                    
-                    # Process message based on type
-                    self._process_service_message(message)
-                    
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    self.logger.error(f"Error processing service message: {e}")
-                    
-        except Exception as e:
-            self.logger.error(f"Service message processor error: {e}")
-        finally:
-            self.logger.info("Service message processor stopped")
+        while self._is_running:
+            try:
+                message = self._service_queue.get(timeout=1.0)
+                self._process_service_message(message)
+                self._messages_received += 1
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"Error processing service message: {e}")
+                self._errors_count += 1
+        
+        self.logger.info("Service message processor stopped")
     
-    def _process_gui_message(self, message: ServiceMessage) -> None:
-        """Process a message received by the GUI."""
-        try:
-            if message.message_type == MessageType.STATUS_UPDATE:
-                # Extract status data
-                status_data = message.data.get('status', {})
-                service_status = ServiceStatus(
-                    state=ServiceState(status_data.get('state', 'stopped')),
-                    start_time=datetime.fromisoformat(status_data['start_time']) if status_data.get('start_time') else None,
-                    last_scan_time=datetime.fromisoformat(status_data['last_scan_time']) if status_data.get('last_scan_time') else None,
-                    files_processed=status_data.get('files_processed', 0),
-                    files_failed=status_data.get('files_failed', 0),
-                    current_operation=status_data.get('current_operation'),
-                    error_message=status_data.get('error_message'),
-                    uptime_seconds=status_data.get('uptime_seconds', 0),
-                    last_error_time=datetime.fromisoformat(status_data['last_error_time']) if status_data.get('last_error_time') else None,
-                    consecutive_errors=status_data.get('consecutive_errors', 0),
-                    health_score=status_data.get('health_score', 100.0)
-                )
-                
-                # Notify status callbacks
-                for callback in self._status_callbacks:
-                    try:
-                        callback(service_status)
-                    except Exception as e:
-                        self.logger.error(f"Error in status callback: {e}")
-            
-            elif message.message_type == MessageType.PROGRESS_UPDATE:
-                # Create progress update message
-                progress_msg = ProgressUpdateMessage(
-                    message_type=message.message_type,
-                    timestamp=message.timestamp,
-                    data=message.data,
-                    message_id=message.message_id,
-                    current_file=message.data.get('current_file', ''),
-                    total_files=message.data.get('total_files', 0),
-                    processed_files=message.data.get('processed_files', 0),
-                    failed_files=message.data.get('failed_files', 0),
-                    current_operation=message.data.get('current_operation', ''),
-                    progress_percentage=message.data.get('progress_percentage', 0.0)
-                )
-                
-                # Notify progress callbacks
-                for callback in self._progress_callbacks:
-                    try:
-                        callback(progress_msg)
-                    except Exception as e:
-                        self.logger.error(f"Error in progress callback: {e}")
-            
-            elif message.message_type == MessageType.FILE_PROCESSED:
-                # Create file processed message
-                file_msg = FileProcessedMessage(
-                    message_type=message.message_type,
-                    timestamp=message.timestamp,
-                    data=message.data,
-                    message_id=message.message_id,
-                    file_path=message.data.get('file_path', ''),
-                    processing_status=ProcessingStatus(message.data.get('processing_status', 'failed')),
-                    processing_duration=message.data.get('processing_duration', 0.0),
-                    subtitle_operations=message.data.get('subtitle_operations', []),
-                    error_message=message.data.get('error_message')
-                )
-                
-                # Notify file callbacks
-                for callback in self._file_callbacks:
-                    try:
-                        callback(file_msg)
-                    except Exception as e:
-                        self.logger.error(f"Error in file callback: {e}")
-            
-            elif message.message_type == MessageType.SCAN_STARTED or message.message_type == MessageType.SCAN_COMPLETED:
-                # Create scan session message
-                scan_msg = ScanSessionMessage(
-                    message_type=message.message_type,
-                    timestamp=message.timestamp,
-                    data=message.data,
-                    message_id=message.message_id,
-                    session_id=message.data.get('session_id', 0),
-                    directories_scanned=message.data.get('directories_scanned', []),
-                    files_found=message.data.get('files_found', 0),
-                    files_processed=message.data.get('files_processed', 0),
-                    files_skipped=message.data.get('files_skipped', 0),
-                    files_failed=message.data.get('files_failed', 0),
-                    scan_duration=message.data.get('scan_duration', 0.0)
-                )
-                
-                # Notify scan callbacks
-                for callback in self._scan_callbacks:
-                    try:
-                        callback(scan_msg)
-                    except Exception as e:
-                        self.logger.error(f"Error in scan callback: {e}")
-            
-            elif message.message_type == MessageType.ERROR_OCCURRED:
-                # Notify error callbacks
-                for callback in self._error_callbacks:
-                    try:
-                        callback(message)
-                    except Exception as e:
-                        self.logger.error(f"Error in error callback: {e}")
-            
-        except Exception as e:
-            self.logger.error(f"Error processing GUI message: {e}")
+    def _command_processor(self) -> None:
+        """Process commands from command queue."""
+        self.logger.info("Command processor started")
+        
+        while self._is_running:
+            try:
+                message = self._command_queue.get(timeout=1.0)
+                self._process_command_message(message)
+                self._commands_processed += 1
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"Error processing command: {e}")
+                self._errors_count += 1
+        
+        self.logger.info("Command processor stopped")
     
     def _process_service_message(self, message: ServiceMessage) -> None:
-        """Process a message received by the service."""
+        """Process a service message."""
         try:
-            if message.message_type == MessageType.USER_COMMAND:
-                # Extract command data
-                command_data = message.data.get('command', {})
-                command = UserCommand(command_data.get('type', ''))
-                parameters = command_data.get('parameters', {})
-                
-                # Create user command message
-                cmd_msg = UserCommandMessage(
-                    message_type=message.message_type,
-                    timestamp=message.timestamp,
-                    data=message.data,
-                    message_id=message.message_id,
-                    command=command,
-                    parameters=parameters
-                )
-                
-                # Notify command callbacks and get response callback
-                for callback in self._command_callbacks:
-                    try:
-                        response_callback = callback(cmd_msg)
-                        if response_callback:
-                            # Store response callback for later use
-                            # In a real implementation, you'd want to track this properly
-                            pass
-                    except Exception as e:
-                        self.logger.error(f"Error in command callback: {e}")
+            message_type = message.message_type
             
+            if message_type in self._message_processors:
+                for processor in self._message_processors[message_type]:
+                    try:
+                        processor(message)
+                    except Exception as e:
+                        self.logger.error(f"Error in message processor: {e}")
+            else:
+                self.logger.debug(f"No processors registered for {message_type.value}")
+                
         except Exception as e:
             self.logger.error(f"Error processing service message: {e}")
+            self._errors_count += 1
     
-    # Callback registration methods
-    def register_status_callback(self, callback: Callable[[ServiceStatus], None]) -> None:
-        """Register a callback for status updates."""
-        with self._lock:
-            if callback not in self._status_callbacks:
-                self._status_callbacks.append(callback)
+    def _process_command_message(self, message: CommandMessage) -> None:
+        """Process a command message."""
+        try:
+            command = message.command
+            
+            if command in self._command_handlers:
+                handler = self._command_handlers[command]
+                try:
+                    handler(message.parameters)
+                    self.logger.info(f"Command executed: {command.value}")
+                except Exception as e:
+                    self.logger.error(f"Error executing command {command.value}: {e}")
+                    self._errors_count += 1
+            else:
+                self.logger.warning(f"No handler registered for command: {command.value}")
+                
+        except Exception as e:
+            self.logger.error(f"Error processing command message: {e}")
+            self._errors_count += 1
     
-    def unregister_status_callback(self, callback: Callable[[ServiceStatus], None]) -> None:
-        """Unregister a status callback."""
-        with self._lock:
-            if callback in self._status_callbacks:
-                self._status_callbacks.remove(callback)
+    def _setup_default_handlers(self) -> None:
+        """Setup default command handlers."""
+        # Default handlers will be implemented by the service
+        pass
     
-    def register_progress_callback(self, callback: Callable[[ProgressUpdateMessage], None]) -> None:
-        """Register a callback for progress updates."""
-        with self._lock:
-            if callback not in self._progress_callbacks:
-                self._progress_callbacks.append(callback)
+    # Convenience methods for sending specific message types
     
-    def unregister_progress_callback(self, callback: Callable[[ProgressUpdateMessage], None]) -> None:
-        """Unregister a progress callback."""
-        with self._lock:
-            if callback in self._progress_callbacks:
-                self._progress_callbacks.remove(callback)
-    
-    def register_file_callback(self, callback: Callable[[FileProcessedMessage], None]) -> None:
-        """Register a callback for file processing updates."""
-        with self._lock:
-            if callback not in self._file_callbacks:
-                self._file_callbacks.append(callback)
-    
-    def unregister_file_callback(self, callback: Callable[[FileProcessedMessage], None]) -> None:
-        """Unregister a file callback."""
-        with self._lock:
-            if callback in self._file_callbacks:
-                self._file_callbacks.remove(callback)
-    
-    def register_scan_callback(self, callback: Callable[[ScanSessionMessage], None]) -> None:
-        """Register a callback for scan session updates."""
-        with self._lock:
-            if callback not in self._scan_callbacks:
-                self._scan_callbacks.append(callback)
-    
-    def unregister_scan_callback(self, callback: Callable[[ScanSessionMessage], None]) -> None:
-        """Unregister a scan callback."""
-        with self._lock:
-            if callback in self._scan_callbacks:
-                self._scan_callbacks.remove(callback)
-    
-    def register_error_callback(self, callback: Callable[[ServiceMessage], None]) -> None:
-        """Register a callback for error messages."""
-        with self._lock:
-            if callback not in self._error_callbacks:
-                self._error_callbacks.append(callback)
-    
-    def unregister_error_callback(self, callback: Callable[[ServiceMessage], None]) -> None:
-        """Unregister an error callback."""
-        with self._lock:
-            if callback in self._error_callbacks:
-                self._error_callbacks.remove(callback)
-    
-    def register_command_callback(self, callback: Callable[[UserCommandMessage], Callable[[bool, Dict[str, Any], Optional[str]], None]]) -> None:
-        """Register a callback for user commands."""
-        with self._lock:
-            if callback not in self._command_callbacks:
-                self._command_callbacks.append(callback)
-    
-    def unregister_command_callback(self, callback: Callable[[UserCommandMessage], Callable[[bool, Dict[str, Any], Optional[str]], None]]) -> None:
-        """Unregister a command callback."""
-        with self._lock:
-            if callback in self._command_callbacks:
-                self._command_callbacks.remove(callback)
-    
-    # Convenience methods for sending common messages
-    def send_status_update(self, service_status: ServiceStatus) -> bool:
-        """Send a status update to the GUI."""
-        message = ServiceMessage(
+    def send_status_update(self, status_data: Dict[str, Any]) -> bool:
+        """Send a status update message."""
+        message = StatusMessage(
             message_type=MessageType.STATUS_UPDATE,
-            timestamp=time.time(),
-            data={'status': asdict(service_status)}
+            source="service",
+            target="all",
+            data=status_data,
+            **status_data
         )
-        return self.send_to_gui(message)
+        return self.send_message(message)
     
-    def send_progress_update(self, current_file: str, total_files: int, processed_files: int,
-                           failed_files: int, current_operation: str) -> bool:
-        """Send a progress update to the GUI."""
-        progress_percentage = (processed_files / total_files * 100) if total_files > 0 else 0.0
-        
-        message = ServiceMessage(
+    def send_progress_update(self, progress_data: Dict[str, Any]) -> bool:
+        """Send a progress update message."""
+        message = ProgressMessage(
             message_type=MessageType.PROGRESS_UPDATE,
-            timestamp=time.time(),
-            data={
-                'current_file': current_file,
-                'total_files': total_files,
-                'processed_files': processed_files,
-                'failed_files': failed_files,
-                'current_operation': current_operation,
-                'progress_percentage': progress_percentage
-            }
+            source="service",
+            target="all",
+            data=progress_data,
+            **progress_data
         )
-        return self.send_to_gui(message)
+        return self.send_message(message)
     
-    def send_file_processed(self, file_path: str, processing_status: ProcessingStatus,
-                          processing_duration: float, subtitle_operations: List[Dict[str, Any]],
-                          error_message: Optional[str] = None) -> bool:
-        """Send a file processed notification to the GUI."""
-        message = ServiceMessage(
+    def send_file_processed(self, file_data: Dict[str, Any]) -> bool:
+        """Send a file processed notification."""
+        message = FileProcessedMessage(
             message_type=MessageType.FILE_PROCESSED,
-            timestamp=time.time(),
-            data={
-                'file_path': file_path,
-                'processing_status': processing_status.value,
-                'processing_duration': processing_duration,
-                'subtitle_operations': subtitle_operations,
-                'error_message': error_message
-            }
+            source="service",
+            target="all",
+            data=file_data,
+            **file_data
         )
-        return self.send_to_gui(message)
+        return self.send_message(message)
     
-    def send_scan_session(self, session_id: int, directories_scanned: List[str],
-                         files_found: int, files_processed: int, files_skipped: int,
-                         files_failed: int, scan_duration: float) -> bool:
-        """
-        Send scan session update to GUI.
-        
-        Args:
-            session_id: ID of the scan session
-            directories_scanned: List of directories that were scanned
-            files_found: Number of files found
-            files_processed: Number of files processed
-            files_skipped: Number of files skipped
-            files_failed: Number of files that failed
-            scan_duration: Duration of the scan in seconds
-            
-        Returns:
-            True if message was sent successfully, False otherwise
-        """
-        try:
-            message = ScanSessionMessage(
-                message_type=MessageType.SCAN_STARTED,
-                timestamp=time.time(),
-                data={
-                    'session_id': session_id,
-                    'directories_scanned': directories_scanned,
-                    'files_found': files_found,
-                    'files_processed': files_processed,
-                    'files_skipped': files_skipped,
-                    'files_failed': files_failed,
-                    'scan_duration': scan_duration
-                },
-                session_id=session_id,
-                directories_scanned=directories_scanned,
-                files_found=files_found,
-                files_processed=files_processed,
-                files_skipped=files_skipped,
-                files_failed=files_failed,
-                scan_duration=scan_duration,
-                message_id=self._generate_message_id()
-            )
-            
-            return self.send_to_gui(message)
-            
-        except Exception as e:
-            self.logger.error(f"Error sending scan session message: {e}")
-            return False
-            
-    def send_scan_started(self, scan_id: str, directories: List[str], timestamp: datetime) -> bool:
-        """
-        Send scan started notification to GUI.
-        
-        Args:
-            scan_id: ID of the scan
-            directories: List of directories being scanned
-            timestamp: When the scan started
-            
-        Returns:
-            True if message was sent successfully, False otherwise
-        """
-        try:
-            message = ServiceMessage(
-                message_type=MessageType.SCAN_STARTED,
-                timestamp=timestamp.timestamp(),
-                data={
-                    'scan_id': scan_id,
-                    'directories': directories,
-                    'timestamp': timestamp.isoformat()
-                },
-                message_id=self._generate_message_id()
-            )
-            
-            return self.send_to_gui(message)
-            
-        except Exception as e:
-            self.logger.error(f"Error sending scan started message: {e}")
-            return False
-            
-    def send_scan_progress(self, scan_id: str, **kwargs) -> bool:
-        """
-        Send scan progress update to GUI.
-        
-        Args:
-            scan_id: ID of the scan
-            **kwargs: Progress data (total_files, new_files, modified_files, etc.)
-            
-        Returns:
-            True if message was sent successfully, False otherwise
-        """
-        try:
-            message = ServiceMessage(
-                message_type=MessageType.PROGRESS_UPDATE,
-                timestamp=time.time(),
-                data={
-                    'scan_id': scan_id,
-                    'progress_type': 'scan',
-                    **kwargs
-                },
-                message_id=self._generate_message_id()
-            )
-            
-            return self.send_to_gui(message)
-            
-        except Exception as e:
-            self.logger.error(f"Error sending scan progress message: {e}")
-            return False
-            
-    def send_scan_completed(self, scan_id: str, total_files: int, new_files: int,
-                          modified_files: int, unchanged_files: int, scan_duration: float,
-                          errors: List[str] = None) -> bool:
-        """
-        Send scan completed notification to GUI.
-        
-        Args:
-            scan_id: ID of the scan
-            total_files: Total number of files found
-            new_files: Number of new files
-            modified_files: Number of modified files
-            unchanged_files: Number of unchanged files
-            scan_duration: Duration of the scan in seconds
-            errors: List of errors that occurred during scan
-            
-        Returns:
-            True if message was sent successfully, False otherwise
-        """
-        try:
-            message = ServiceMessage(
-                message_type=MessageType.SCAN_COMPLETED,
-                timestamp=time.time(),
-                data={
-                    'scan_id': scan_id,
-                    'total_files': total_files,
-                    'new_files': new_files,
-                    'modified_files': modified_files,
-                    'unchanged_files': unchanged_files,
-                    'scan_duration': scan_duration,
-                    'errors': errors or []
-                },
-                message_id=self._generate_message_id()
-            )
-            
-            return self.send_to_gui(message)
-            
-        except Exception as e:
-            self.logger.error(f"Error sending scan completed message: {e}")
-            return False
-            
-    def send_scan_error(self, scan_id: str, error_message: str, scan_duration: float) -> bool:
-        """
-        Send scan error notification to GUI.
-        
-        Args:
-            scan_id: ID of the scan
-            error_message: Error message
-            scan_duration: Duration of the scan before error
-            
-        Returns:
-            True if message was sent successfully, False otherwise
-        """
-        try:
-            message = ServiceMessage(
-                message_type=MessageType.ERROR_OCCURRED,
-                timestamp=time.time(),
-                data={
-                    'scan_id': scan_id,
-                    'error_type': 'scan_error',
-                    'error_message': error_message,
-                    'scan_duration': scan_duration
-                },
-                message_id=self._generate_message_id()
-            )
-            
-            return self.send_to_gui(message)
-            
-        except Exception as e:
-            self.logger.error(f"Error sending scan error message: {e}")
-            return False
-    
-    def send_user_command(self, command: UserCommand, parameters: Dict[str, Any] = None) -> bool:
-        """Send a user command to the service."""
-        if parameters is None:
-            parameters = {}
-        
-        message = ServiceMessage(
-            message_type=MessageType.USER_COMMAND,
-            timestamp=time.time(),
-            data={
-                'command': {
-                    'type': command.value,
-                    'parameters': parameters
-                }
-            }
+    def send_scan_update(self, scan_data: Dict[str, Any]) -> bool:
+        """Send a scan update message."""
+        message = ScanUpdateMessage(
+            message_type=MessageType.SCAN_UPDATE,
+            source="service",
+            target="all",
+            data=scan_data,
+            **scan_data
         )
-        return self.send_to_service(message)
+        return self.send_message(message)
     
-    def send_command_response(self, original_command: UserCommand, success: bool,
-                            response_data: Dict[str, Any] = None, error_message: Optional[str] = None) -> bool:
-        """Send a response to a user command."""
-        if response_data is None:
-            response_data = {}
-        
-        message = ServiceMessage(
-            message_type=MessageType.COMMAND_RESPONSE,
-            timestamp=time.time(),
-            data={
-                'original_command': original_command.value,
-                'success': success,
-                'response_data': response_data,
-                'error_message': error_message
-            }
+    def send_error(self, error_data: Dict[str, Any]) -> bool:
+        """Send an error message."""
+        message = ErrorMessage(
+            message_type=MessageType.ERROR,
+            source="service",
+            target="all",
+            data=error_data,
+            **error_data
         )
-        return self.send_to_gui(message) 
+        return self.send_message(message)
+    
+    def send_scan_started(self, scan_session_id: str, scan_type: str = "full") -> bool:
+        """Send scan started notification."""
+        return self.send_scan_update({
+            "scan_session_id": scan_session_id,
+            "scan_type": scan_type,
+            "scan_status": "running",
+            "total_files_found": 0,
+            "new_files_found": 0,
+            "modified_files_found": 0,
+            "unchanged_files": 0,
+            "scan_duration": 0.0
+        })
+    
+    def send_scan_progress(self, scan_session_id: str, progress_data: Dict[str, Any]) -> bool:
+        """Send scan progress update."""
+        return self.send_scan_update({
+            "scan_session_id": scan_session_id,
+            "scan_status": "running",
+            **progress_data
+        })
+    
+    def send_scan_completed(self, scan_session_id: str, final_data: Dict[str, Any]) -> bool:
+        """Send scan completed notification."""
+        return self.send_scan_update({
+            "scan_session_id": scan_session_id,
+            "scan_status": "completed",
+            **final_data
+        })
+    
+    def send_scan_error(self, scan_session_id: str, error_message: str) -> bool:
+        """Send scan error notification."""
+        return self.send_scan_update({
+            "scan_session_id": scan_session_id,
+            "scan_status": "failed",
+            "error_message": error_message
+        })
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get communication statistics."""
+        return {
+            "messages_sent": self._messages_sent,
+            "messages_received": self._messages_received,
+            "commands_processed": self._commands_processed,
+            "errors_count": self._errors_count,
+            "is_running": self._is_running,
+            "queue_sizes": {
+                "service_queue": self._service_queue.qsize(),
+                "command_queue": self._command_queue.qsize()
+            }
+        } 

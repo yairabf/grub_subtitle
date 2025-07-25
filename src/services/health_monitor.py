@@ -599,17 +599,12 @@ class HealthMonitor:
             
             # Could send email, SMS, or call external monitoring systems
             if self.communication_manager:
-                self.communication_manager.send_to_gui(
-                    self.communication_manager.ServiceMessage(
-                        message_type=MessageType.ERROR_OCCURRED,
-                        timestamp=time.time(),
-                        data={
-                            'severity': 'critical',
-                            'message': 'Service health critical, manual intervention required',
-                            'escalation': True
-                        }
-                    )
-                )
+                self.communication_manager.send_error({
+                    'error_type': 'health_critical',
+                    'error_message': 'Service health critical, manual intervention required',
+                    'severity': 'critical',
+                    'escalation': True
+                })
             
             return True
         except Exception as e:
@@ -625,22 +620,17 @@ class HealthMonitor:
             
             # Send via communication manager
             if self.communication_manager:
-                self.communication_manager.send_to_gui(
-                    self.communication_manager.ServiceMessage(
-                        message_type=MessageType.ERROR_OCCURRED,
-                        timestamp=time.time(),
-                        data={
-                            'severity': health_status.value,
-                            'message': alert_message,
-                            'metrics': {
-                                'cpu': metrics.cpu_percentage,
-                                'memory': metrics.memory_percentage,
-                                'disk': metrics.disk_usage_percentage,
-                                'health_score': metrics.health_score
-                            }
-                        }
-                    )
-                )
+                self.communication_manager.send_error({
+                    'error_type': 'health_alert',
+                    'error_message': alert_message,
+                    'severity': health_status.value,
+                    'metrics': {
+                        'cpu': metrics.cpu_percentage,
+                        'memory': metrics.memory_percentage,
+                        'disk': metrics.disk_usage_percentage,
+                        'health_score': metrics.health_score
+                    }
+                })
             
             # Notify alert callbacks
             self._notify_alert_callbacks(alert_message, health_status)
