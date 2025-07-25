@@ -1,0 +1,58 @@
+# Hebrew Subtitle Service Configuration
+# This file contains all configuration settings for the subtitle service
+
+api:
+  opensubtitles:
+    username: ${OPENSUBTITLES_USERNAME}
+    password: ${OPENSUBTITLES_PASSWORD}
+    base_url: "https://api.opensubtitles.com/xml-rpc"
+    user_agent: "HebrewSubtitleService/1.0"
+    timeout: 30
+    max_retries: 3
+  
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    model: "gpt-3.5-turbo"
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+    max_retries: 3
+
+processing:
+  chunk_size: 3000
+  max_blocks_per_chunk: 10
+  supported_video_formats: [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"]
+  max_concurrent_processes: 3
+  temp_directory: "./temp"
+  
+validation:
+  min_hebrew_ratio: 0.5
+  max_timestamp_error: 0.1
+  auto_fix: true
+  strict_mode: false
+  
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/subtitle_service.log"
+  max_size: "10MB"
+  backup_count: 5
+  format: "json"  # json, text
+  console_output: true
+  
+security:
+  encrypt_api_keys: true
+  key_rotation_days: 90
+  secure_storage_path: "./secure"
+  audit_logging: true
+  
+ui:
+  theme: "default"  # default, dark, light
+  language: "en"    # en, he
+  auto_save_config: true
+  show_advanced_options: false
+  
+paths:
+  default_output_dir: "./subtitles"
+  log_directory: "./logs"
+  config_directory: "./config"
+  cache_directory: "./cache" 

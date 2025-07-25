@@ -1,0 +1,642 @@
+"""
+File Tracking System for Background Service
+
+This module provides a SQLite-based file tracking system that monitors
+which video files have been processed for Hebrew subtitles, tracks
+processing status, and prevents unnecessary reprocessing.
+"""
+
+import sqlite3
+import hashlib
+import json
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
+from dataclasses import dataclass
+from enum import Enum
+
+from logging_system.subtitle_logger import SubtitleLogger
+
+
+class ProcessingStatus(Enum):
+    """Processing status enumeration."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class OperationType(Enum):
+    """Subtitle operation types."""
+    DOWNLOAD = "download"
+    TRANSLATE = "translate"
+    VALIDATE = "validate"
+
+
+@dataclass
+class FileInfo:
+    """File information for tracking."""
+    file_path: str
+    file_hash: str
+    file_size: int
+    file_modified_time: float
+    processing_status: ProcessingStatus
+    processing_start_time: Optional[float] = None
+    processing_end_time: Optional[float] = None
+    processing_duration: Optional[float] = None
+    error_message: Optional[str] = None
+    created_at: Optional[float] = None
+    updated_at: Optional[float] = None
+
+
+@dataclass
+class SubtitleOperation:
+    """Subtitle operation tracking information."""
+    file_id: int
+    operation_type: OperationType
+    operation_status: ProcessingStatus
+    subtitle_language: Optional[str] = None
+    subtitle_path: Optional[str] = None
+    subtitle_source: Optional[str] = None
+    operation_start_time: Optional[float] = None
+    operation_end_time: Optional[float] = None
+    operation_duration: Optional[float] = None
+    error_message: Optional[str] = None
+
+
+@dataclass
+class ScanSession:
+    """Scan session tracking information."""
+    session_start_time: float
+    directories_scanned: List[str]
+    files_found: int = 0
+    files_processed: int = 0
+    files_skipped: int = 0
+    files_failed: int = 0
+    scan_duration: Optional[float] = None
+
+
+class FileTracker:
+    """
+    SQLite-based file tracking system for background service.
+    
+    Tracks processed files, processing status, and prevents unnecessary
+    reprocessing of files that already have Hebrew subtitles.
+    """
+    
+    def __init__(self, db_path: Optional[str] = None, config: Optional[Dict[str, Any]] = None):
+        """
+        Initialize the file tracker.
+        
+        Args:
+            db_path: Path to SQLite database file. If None, uses default location.
+            config: Configuration dictionary for logging and other settings.
+        """
+        self.config = config or {}
+        self.logger = SubtitleLogger(self.config)
+        
+        # Set up database path
+        if db_path is None:
+            home_dir = Path.home()
+            db_dir = home_dir / ".grab_sub"
+            db_dir.mkdir(exist_ok=True)
+            db_path = str(db_dir / "file_tracking.db")
+        
+        self.db_path = db_path
+        self.logger.info(f"Initializing file tracker with database: {db_path}")
+        
+        # Initialize database
+        self._init_database()
+    
+    def _init_database(self) -> None:
+        """Initialize database tables and schema."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                
+                # Create processed_files table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS processed_files (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_path TEXT UNIQUE NOT NULL,
+                        file_hash TEXT NOT NULL,
+                        file_size INTEGER NOT NULL,
+                        file_modified_time REAL NOT NULL,
+                        processing_status TEXT NOT NULL,
+                        processing_start_time REAL,
+                        processing_end_time REAL,
+                        processing_duration REAL,
+                        error_message TEXT,
+                        created_at REAL DEFAULT (unixepoch()),
+                        updated_at REAL DEFAULT (unixepoch())
+                    )
+                """)
+                
+                # Create subtitle_operations table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS subtitle_operations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_id INTEGER NOT NULL,
+                        operation_type TEXT NOT NULL,
+                        operation_status TEXT NOT NULL,
+                        subtitle_language TEXT,
+                        subtitle_path TEXT,
+                        subtitle_source TEXT,
+                        operation_start_time REAL,
+                        operation_end_time REAL,
+                        operation_duration REAL,
+                        error_message TEXT,
+                        created_at REAL DEFAULT (unixepoch()),
+                        FOREIGN KEY (file_id) REFERENCES processed_files(id) ON DELETE CASCADE
+                    )
+                """)
+                
+                # Create scan_sessions table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_start_time REAL NOT NULL,
+                        session_end_time REAL,
+                        directories_scanned TEXT NOT NULL,
+                        files_found INTEGER DEFAULT 0,
+                        files_processed INTEGER DEFAULT 0,
+                        files_skipped INTEGER DEFAULT 0,
+                        files_failed INTEGER DEFAULT 0,
+                        scan_duration REAL,
+                        created_at REAL DEFAULT (unixepoch())
+                    )
+                """)
+                
+                # Create indexes for better performance
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_file_path ON processed_files(file_path)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON processed_files(file_hash)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_processing_status ON processed_files(processing_status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_file_id ON subtitle_operations(file_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_operation_type ON subtitle_operations(operation_type)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_session_start ON scan_sessions(session_start_time)")
+                
+                conn.commit()
+                
+            self.logger.info("Database initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize database: {e}")
+            raise
+    
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """
+        Calculate SHA-256 hash of file for change detection.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            SHA-256 hash of the file
+        """
+        try:
+            hash_sha256 = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_sha256.update(chunk)
+            return hash_sha256.hexdigest()
+        except Exception as e:
+            self.logger.error(f"Error calculating file hash for {file_path}: {e}")
+            return ""
+    
+    def _get_file_info(self, file_path: Path) -> Optional[FileInfo]:
+        """
+        Get file information from database.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            FileInfo object if found, None otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute(
+                    "SELECT * FROM processed_files WHERE file_path = ?",
+                    (str(file_path),)
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    return FileInfo(
+                        file_path=row['file_path'],
+                        file_hash=row['file_hash'],
+                        file_size=row['file_size'],
+                        file_modified_time=row['file_modified_time'],
+                        processing_status=ProcessingStatus(row['processing_status']),
+                        processing_start_time=row['processing_start_time'],
+                        processing_end_time=row['processing_end_time'],
+                        processing_duration=row['processing_duration'],
+                        error_message=row['error_message'],
+                        created_at=row['created_at'],
+                        updated_at=row['updated_at']
+                    )
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error getting file info for {file_path}: {e}")
+            return None
+    
+    def should_process_file(self, file_path: Path) -> bool:
+        """
+        Determine if a file should be processed.
+        
+        Args:
+            file_path: Path to the video file
+            
+        Returns:
+            True if file should be processed, False otherwise
+        """
+        try:
+            # Check if file exists
+            if not file_path.exists():
+                return False
+            
+            # Get file stats
+            stat = file_path.stat()
+            file_size = stat.st_size
+            file_modified_time = stat.st_mtime
+            
+            # Get existing file info from database
+            existing_info = self._get_file_info(file_path)
+            
+            if existing_info is None:
+                # File never processed before
+                self.logger.info(f"File {file_path} never processed before")
+                return True
+            
+            # Check if file has changed
+            if (existing_info.file_size != file_size or 
+                existing_info.file_modified_time != file_modified_time):
+                self.logger.info(f"File {file_path} has changed, needs reprocessing")
+                return True
+            
+            # Check processing status
+            if existing_info.processing_status == ProcessingStatus.FAILED:
+                self.logger.info(f"File {file_path} previously failed, retrying")
+                return True
+            
+            if existing_info.processing_status == ProcessingStatus.SUCCESS:
+                self.logger.info(f"File {file_path} already successfully processed")
+                return False
+            
+            # For other statuses (PENDING, PROCESSING, SKIPPED), process
+            self.logger.info(f"File {file_path} has status {existing_info.processing_status}, processing")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error checking if file should be processed {file_path}: {e}")
+            return True  # Process on error to be safe
+    
+    def add_file_record(self, file_path: Path) -> int:
+        """
+        Add a new file record to the database.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Database ID of the new record
+        """
+        try:
+            stat = file_path.stat()
+            file_hash = self._calculate_file_hash(file_path)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    INSERT INTO processed_files 
+                    (file_path, file_hash, file_size, file_modified_time, processing_status)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    str(file_path),
+                    file_hash,
+                    stat.st_size,
+                    stat.st_mtime,
+                    ProcessingStatus.PENDING.value
+                ))
+                conn.commit()
+                return cursor.lastrowid
+                
+        except Exception as e:
+            self.logger.error(f"Error adding file record for {file_path}: {e}")
+            raise
+    
+    def update_file_status(self, file_path: Path, status: ProcessingStatus, 
+                          error_message: Optional[str] = None) -> bool:
+        """
+        Update file processing status.
+        
+        Args:
+            file_path: Path to the file
+            status: New processing status
+            error_message: Error message if status is FAILED
+            
+        Returns:
+            True if update was successful
+        """
+        try:
+            current_time = datetime.now().timestamp()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                if status == ProcessingStatus.PROCESSING:
+                    # Set start time
+                    conn.execute("""
+                        UPDATE processed_files 
+                        SET processing_status = ?, processing_start_time = ?, updated_at = ?
+                        WHERE file_path = ?
+                    """, (status.value, current_time, current_time, str(file_path)))
+                elif status in [ProcessingStatus.SUCCESS, ProcessingStatus.FAILED, ProcessingStatus.SKIPPED]:
+                    # Set end time and calculate duration
+                    conn.execute("""
+                        UPDATE processed_files 
+                        SET processing_status = ?, processing_end_time = ?, 
+                            processing_duration = processing_end_time - processing_start_time,
+                            error_message = ?, updated_at = ?
+                        WHERE file_path = ?
+                    """, (status.value, current_time, error_message, current_time, str(file_path)))
+                else:
+                    # Just update status
+                    conn.execute("""
+                        UPDATE processed_files 
+                        SET processing_status = ?, updated_at = ?
+                        WHERE file_path = ?
+                    """, (status.value, current_time, str(file_path)))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Error updating file status for {file_path}: {e}")
+            return False
+    
+    def record_subtitle_operation(self, file_id: int, operation: SubtitleOperation) -> int:
+        """
+        Record a subtitle operation.
+        
+        Args:
+            file_id: Database ID of the file
+            operation: Subtitle operation information
+            
+        Returns:
+            Database ID of the operation record
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    INSERT INTO subtitle_operations 
+                    (file_id, operation_type, operation_status, subtitle_language,
+                     subtitle_path, subtitle_source, operation_start_time,
+                     operation_end_time, operation_duration, error_message)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    file_id,
+                    operation.operation_type.value,
+                    operation.operation_status.value,
+                    operation.subtitle_language,
+                    operation.subtitle_path,
+                    operation.subtitle_source,
+                    operation.operation_start_time,
+                    operation.operation_end_time,
+                    operation.operation_duration,
+                    operation.error_message
+                ))
+                conn.commit()
+                return cursor.lastrowid
+                
+        except Exception as e:
+            self.logger.error(f"Error recording subtitle operation: {e}")
+            raise
+    
+    def start_scan_session(self, directories: List[str]) -> int:
+        """
+        Start a new scan session.
+        
+        Args:
+            directories: List of directories being scanned
+            
+        Returns:
+            Database ID of the scan session
+        """
+        try:
+            session_start_time = datetime.now().timestamp()
+            directories_json = json.dumps(directories)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    INSERT INTO scan_sessions 
+                    (session_start_time, directories_scanned)
+                    VALUES (?, ?)
+                """, (session_start_time, directories_json))
+                conn.commit()
+                return cursor.lastrowid
+                
+        except Exception as e:
+            self.logger.error(f"Error starting scan session: {e}")
+            raise
+    
+    def end_scan_session(self, session_id: int, files_found: int, files_processed: int,
+                        files_skipped: int, files_failed: int) -> bool:
+        """
+        End a scan session with results.
+        
+        Args:
+            session_id: Database ID of the scan session
+            files_found: Number of files found
+            files_processed: Number of files processed
+            files_skipped: Number of files skipped
+            files_failed: Number of files that failed
+            
+        Returns:
+            True if update was successful
+        """
+        try:
+            session_end_time = datetime.now().timestamp()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                # Get session start time to calculate duration
+                cursor = conn.execute(
+                    "SELECT session_start_time FROM scan_sessions WHERE id = ?",
+                    (session_id,)
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    scan_duration = session_end_time - row[0]
+                    
+                    conn.execute("""
+                        UPDATE scan_sessions 
+                        SET session_end_time = ?, scan_duration = ?,
+                            files_found = ?, files_processed = ?, 
+                            files_skipped = ?, files_failed = ?
+                        WHERE id = ?
+                    """, (
+                        session_end_time, scan_duration,
+                        files_found, files_processed, files_skipped, files_failed,
+                        session_id
+                    ))
+                    conn.commit()
+                    return True
+                
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error ending scan session {session_id}: {e}")
+            return False
+    
+    def get_processing_statistics(self, days: int = 30) -> Dict[str, Any]:
+        """
+        Get processing statistics for the last N days.
+        
+        Args:
+            days: Number of days to look back
+            
+        Returns:
+            Dictionary with processing statistics
+        """
+        try:
+            cutoff_time = datetime.now().timestamp() - (days * 24 * 60 * 60)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                # File processing statistics
+                cursor = conn.execute("""
+                    SELECT processing_status, COUNT(*) as count
+                    FROM processed_files 
+                    WHERE created_at >= ?
+                    GROUP BY processing_status
+                """, (cutoff_time,))
+                
+                status_counts = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # Operation statistics
+                cursor = conn.execute("""
+                    SELECT operation_type, operation_status, COUNT(*) as count
+                    FROM subtitle_operations 
+                    WHERE created_at >= ?
+                    GROUP BY operation_type, operation_status
+                """, (cutoff_time,))
+                
+                operation_counts = {}
+                for row in cursor.fetchall():
+                    op_type = row[0]
+                    op_status = row[1]
+                    count = row[2]
+                    
+                    if op_type not in operation_counts:
+                        operation_counts[op_type] = {}
+                    operation_counts[op_type][op_status] = count
+                
+                # Scan session statistics
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as session_count,
+                           AVG(scan_duration) as avg_scan_duration,
+                           SUM(files_found) as total_files_found,
+                           SUM(files_processed) as total_files_processed,
+                           SUM(files_skipped) as total_files_skipped,
+                           SUM(files_failed) as total_files_failed
+                    FROM scan_sessions 
+                    WHERE session_start_time >= ?
+                """, (cutoff_time,))
+                
+                scan_stats = cursor.fetchone()
+                
+                return {
+                    'period_days': days,
+                    'file_status_counts': status_counts,
+                    'operation_counts': operation_counts,
+                    'scan_sessions': scan_stats[0] if scan_stats else 0,
+                    'avg_scan_duration': scan_stats[1] if scan_stats else 0,
+                    'total_files_found': scan_stats[2] if scan_stats else 0,
+                    'total_files_processed': scan_stats[3] if scan_stats else 0,
+                    'total_files_skipped': scan_stats[4] if scan_stats else 0,
+                    'total_files_failed': scan_stats[5] if scan_stats else 0
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error getting processing statistics: {e}")
+            return {}
+    
+    def cleanup_old_records(self, days_to_keep: int = 90) -> int:
+        """
+        Clean up old records to prevent database bloat.
+        
+        Args:
+            days_to_keep: Number of days of records to keep
+            
+        Returns:
+            Number of records deleted
+        """
+        try:
+            cutoff_time = datetime.now().timestamp() - (days_to_keep * 24 * 60 * 60)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                # Delete old scan sessions
+                cursor = conn.execute(
+                    "DELETE FROM scan_sessions WHERE session_start_time < ?",
+                    (cutoff_time,)
+                )
+                sessions_deleted = cursor.rowcount
+                
+                # Delete old subtitle operations (keep successful ones longer)
+                cursor = conn.execute("""
+                    DELETE FROM subtitle_operations 
+                    WHERE created_at < ? AND operation_status != 'success'
+                """, (cutoff_time,))
+                operations_deleted = cursor.rowcount
+                
+                # Delete old file records (keep successful ones longer)
+                cursor = conn.execute("""
+                    DELETE FROM processed_files 
+                    WHERE created_at < ? AND processing_status != 'success'
+                """, (cutoff_time,))
+                files_deleted = cursor.rowcount
+                
+                conn.commit()
+                
+                total_deleted = sessions_deleted + operations_deleted + files_deleted
+                self.logger.info(f"Cleaned up {total_deleted} old records")
+                return total_deleted
+                
+        except Exception as e:
+            self.logger.error(f"Error cleaning up old records: {e}")
+            return 0
+    
+    def get_database_info(self) -> Dict[str, Any]:
+        """
+        Get database information and statistics.
+        
+        Returns:
+            Dictionary with database information
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Get table sizes
+                cursor = conn.execute("SELECT COUNT(*) FROM processed_files")
+                files_count = cursor.fetchone()[0]
+                
+                cursor = conn.execute("SELECT COUNT(*) FROM subtitle_operations")
+                operations_count = cursor.fetchone()[0]
+                
+                cursor = conn.execute("SELECT COUNT(*) FROM scan_sessions")
+                sessions_count = cursor.fetchone()[0]
+                
+                # Get database file size
+                db_size = Path(self.db_path).stat().st_size if Path(self.db_path).exists() else 0
+                
+                return {
+                    'database_path': self.db_path,
+                    'database_size_bytes': db_size,
+                    'files_tracked': files_count,
+                    'operations_recorded': operations_count,
+                    'scan_sessions': sessions_count
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error getting database info: {e}")
+            return {} 
