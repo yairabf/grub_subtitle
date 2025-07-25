@@ -230,6 +230,170 @@ class ConfigManager:
         validation_config = self.config.get('validation', {})
         if not 0 <= validation_config.get('min_hebrew_ratio', 0) <= 1:
             raise ConfigurationError("min_hebrew_ratio must be between 0 and 1")
+        
+        # Validate service configuration if present
+        if 'service' in self.config:
+            self._validate_service_config()
+    
+    def _validate_service_config(self):
+        """Validate service-specific configuration."""
+        service_config = self.config.get('service', {})
+        
+        # Validate directory configuration
+        directories = service_config.get('directories', [])
+        if not directories:
+            raise ConfigurationError("At least one directory must be configured for monitoring")
+        
+        for i, directory in enumerate(directories):
+            if not directory.get('path'):
+                raise ConfigurationError(f"Directory {i}: path is required")
+            
+            # Validate path exists or can be created
+            path = directory.get('path')
+            if not os.path.exists(path):
+                try:
+                    os.makedirs(path, exist_ok=True)
+                except OSError:
+                    raise ConfigurationError(f"Directory {i}: cannot create path {path}")
+            
+            # Validate scan interval
+            scan_interval = directory.get('scan_interval_minutes', 30)
+            if scan_interval < 1:
+                raise ConfigurationError(f"Directory {i}: scan_interval_minutes must be at least 1")
+            
+            # Validate file size limit
+            file_size_limit = directory.get('file_size_limit_mb', 10000)
+            if file_size_limit <= 0:
+                raise ConfigurationError(f"Directory {i}: file_size_limit_mb must be greater than 0")
+        
+        # Validate scanning configuration
+        scanning_config = service_config.get('scanning', {})
+        if scanning_config.get('scan_timeout_seconds', 300) <= 0:
+            raise ConfigurationError("scan_timeout_seconds must be greater than 0")
+        if scanning_config.get('max_files_per_scan', 1000) <= 0:
+            raise ConfigurationError("max_files_per_scan must be greater than 0")
+        if scanning_config.get('scan_workers', 2) <= 0:
+            raise ConfigurationError("scan_workers must be greater than 0")
+        
+        # Validate processing configuration
+        processing_config = service_config.get('processing', {})
+        if processing_config.get('queue_size', 100) <= 0:
+            raise ConfigurationError("queue_size must be greater than 0")
+        if processing_config.get('worker_threads', 3) <= 0:
+            raise ConfigurationError("worker_threads must be greater than 0")
+        if processing_config.get('processing_timeout_seconds', 600) <= 0:
+            raise ConfigurationError("processing_timeout_seconds must be greater than 0")
+        
+        # Validate performance configuration
+        performance_config = service_config.get('performance', {})
+        if not 0 <= performance_config.get('cpu_limit_percent', 80) <= 100:
+            raise ConfigurationError("cpu_limit_percent must be between 0 and 100")
+        if performance_config.get('memory_limit_mb', 2048) <= 0:
+            raise ConfigurationError("memory_limit_mb must be greater than 0")
+        
+        # Validate health configuration
+        health_config = service_config.get('health', {})
+        if health_config.get('health_check_interval_seconds', 60) <= 0:
+            raise ConfigurationError("health_check_interval_seconds must be greater than 0")
+        if health_config.get('heartbeat_interval_seconds', 30) <= 0:
+            raise ConfigurationError("heartbeat_interval_seconds must be greater than 0")
+        if not 0 <= health_config.get('health_score_threshold', 50.0) <= 100:
+            raise ConfigurationError("health_score_threshold must be between 0 and 100")
+        
+        # Validate database configuration
+        database_config = service_config.get('database', {})
+        db_path = database_config.get('file_path', './data/service_database.db')
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except OSError:
+                raise ConfigurationError(f"Cannot create database directory: {db_dir}")
+        
+        # Validate logging configuration
+        logging_config = service_config.get('logging', {})
+        log_file = logging_config.get('service_log_file', 'logs/background_service.log')
+        log_dir = os.path.dirname(log_file)
+        if log_dir and not os.path.exists(log_dir):
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+            except OSError:
+                raise ConfigurationError(f"Cannot create log directory: {log_dir}")
+    
+    def validate_service_directories(self) -> Dict[str, List[str]]:
+        """
+        Validate that all configured service directories are accessible.
+        
+        Returns:
+            Dictionary with 'valid' and 'invalid' directory lists
+        """
+        if 'service' not in self.config:
+            return {'valid': [], 'invalid': []}
+        
+        directories = self.config.get('service', {}).get('directories', [])
+        valid_dirs = []
+        invalid_dirs = []
+        
+        for directory in directories:
+            path = directory.get('path', '')
+            if not path:
+                invalid_dirs.append(f"Empty path in directory config")
+                continue
+            
+            try:
+                # Check if path exists or can be created
+                if not os.path.exists(path):
+                    os.makedirs(path, exist_ok=True)
+                
+                # Check if path is readable
+                if not os.access(path, os.R_OK):
+                    invalid_dirs.append(f"Path not readable: {path}")
+                    continue
+                
+                # Check if path is writable (for creating subtitles)
+                if not os.access(path, os.W_OK):
+                    invalid_dirs.append(f"Path not writable: {path}")
+                    continue
+                
+                valid_dirs.append(path)
+                
+            except (OSError, PermissionError) as e:
+                invalid_dirs.append(f"Error accessing {path}: {str(e)}")
+        
+        return {'valid': valid_dirs, 'invalid': invalid_dirs}
+    
+    def get_service_config(self) -> Dict[str, Any]:
+        """
+        Get the service configuration section.
+        
+        Returns:
+            Service configuration dictionary
+        """
+        return self.config.get('service', {})
+    
+    def update_service_config(self, updates: Dict[str, Any]) -> None:
+        """
+        Update service configuration with new values.
+        
+        Args:
+            updates: Dictionary of configuration updates
+        """
+        if 'service' not in self.config:
+            self.config['service'] = {}
+        
+        # Recursively update nested configuration
+        self._update_nested_config(self.config['service'], updates)
+        
+        # Validate the updated configuration
+        self._validate_service_config()
+    
+    def _update_nested_config(self, config: Dict[str, Any], updates: Dict[str, Any]) -> None:
+        """Recursively update nested configuration."""
+        for key, value in updates.items():
+            if isinstance(value, dict) and key in config and isinstance(config[key], dict):
+                self._update_nested_config(config[key], value)
+            else:
+                config[key] = value
     
     def get(self, key: str, default: Any = None) -> Any:
         """

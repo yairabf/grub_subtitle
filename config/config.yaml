@@ -30,6 +30,140 @@ validation:
   max_timestamp_error: 0.1
   auto_fix: true
   strict_mode: false
+
+# Background Service Configuration
+service:
+  # Service lifecycle settings
+  auto_start: false
+  daemon_mode: false
+  restart_on_failure: true
+  max_restart_attempts: 3
+  restart_delay_seconds: 30
+  
+  # Directory monitoring settings
+  directories:
+    - path: "${HOME}/Videos"
+      enabled: true
+      recursive: true
+      scan_interval_minutes: 30
+      file_size_limit_mb: 10000  # 10GB
+      exclude_patterns: ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"]
+      include_patterns: ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
+    
+    - path: "${HOME}/Downloads"
+      enabled: true
+      recursive: false
+      scan_interval_minutes: 15
+      file_size_limit_mb: 5000   # 5GB
+      exclude_patterns: ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"]
+      include_patterns: ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
+  
+  # Scan behavior settings
+  scanning:
+    initial_scan_delay_seconds: 10
+    incremental_scan_enabled: true
+    full_scan_interval_hours: 24
+    scan_timeout_seconds: 300
+    max_files_per_scan: 1000
+    parallel_scanning: true
+    scan_workers: 2
+  
+  # File processing settings
+  processing:
+    queue_size: 100
+    worker_threads: 3
+    processing_timeout_seconds: 600
+    retry_failed_files: true
+    max_retry_attempts: 3
+    retry_delay_seconds: 60
+    prioritize_new_files: true
+    skip_existing_subtitles: true
+  
+  # Performance and resource management
+  performance:
+    cpu_limit_percent: 80
+    memory_limit_mb: 2048
+    disk_io_limit_mbps: 100
+    network_limit_mbps: 50
+    adaptive_processing: true
+    low_power_mode: false
+  
+  # Health monitoring settings
+  health:
+    monitoring_enabled: true
+    health_check_interval_seconds: 60
+    heartbeat_interval_seconds: 30
+    crash_detection_enabled: true
+    auto_recovery_enabled: true
+    health_score_threshold: 50.0
+    
+    # Resource thresholds
+    cpu_warning_percent: 70
+    cpu_critical_percent: 90
+    memory_warning_percent: 80
+    memory_critical_percent: 95
+    disk_warning_percent: 85
+    disk_critical_percent: 95
+  
+  # Communication and notifications
+  communication:
+    message_queue_size: 1000
+    command_timeout_seconds: 30
+    status_update_interval_seconds: 10
+    progress_update_interval_seconds: 5
+    
+  # Notification settings
+  notifications:
+    enabled: true
+    system_notifications: true
+    email_notifications: false
+    email:
+      smtp_server: "smtp.gmail.com"
+      smtp_port: 587
+      username: "${EMAIL_USERNAME}"
+      password: "${EMAIL_PASSWORD}"
+      from_address: "${EMAIL_FROM}"
+      to_addresses: ["${EMAIL_TO}"]
+    
+    # Notification events
+    events:
+      service_started: true
+      service_stopped: true
+      scan_started: false
+      scan_completed: true
+      file_processed: false
+      file_failed: true
+      health_warning: true
+      health_critical: true
+      error_occurred: true
+  
+  # Database and persistence
+  database:
+    file_path: "./data/service_database.db"
+    backup_enabled: true
+    backup_interval_hours: 24
+    backup_retention_days: 7
+    vacuum_interval_hours: 168  # 1 week
+    max_database_size_mb: 100
+  
+  # Logging and debugging
+  logging:
+    service_log_file: "logs/background_service.log"
+    debug_mode: false
+    verbose_logging: false
+    log_rotation:
+      max_size_mb: 10
+      backup_count: 5
+      compress: true
+    
+    # Log levels for different components
+    levels:
+      background_service: "INFO"
+      directory_scanner: "INFO"
+      file_tracker: "INFO"
+      health_monitor: "WARNING"
+      communication: "INFO"
+      processing: "INFO"
   
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
@@ -55,4 +189,6 @@ paths:
   default_output_dir: "./subtitles"
   log_directory: "./logs"
   config_directory: "./config"
-  cache_directory: "./cache" 
+  cache_directory: "./cache"
+  data_directory: "./data"
+  temp_directory: "./temp" 

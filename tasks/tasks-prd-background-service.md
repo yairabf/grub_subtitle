@@ -20,9 +20,9 @@ Based on PRD: `prd-background-service.md`
   - [x] 2.5 Add file validation to ensure only valid video files are processed
   - [x] 2.6 Create scan progress tracking and reporting system
 
-- [ ] 3.0 Service Configuration and Settings
-  - [ ] 3.1 Extend config.yaml with service-specific settings (directories, intervals, language)
-  - [ ] 3.2 Create service configuration validation and testing system
+- [x] 3.0 Service Configuration and Settings
+  - [x] 3.1 Extend config.yaml with service-specific settings (directories, intervals, language)
+  - [x] 3.2 Create service configuration validation and testing system
   - [ ] 3.3 Implement configuration persistence and backup functionality
   - [ ] 3.4 Add configuration import/export capabilities
   - [ ] 3.5 Create command-line configuration interface
@@ -67,6 +67,25 @@ Based on PRD: `prd-background-service.md`
   - [ ] 8.4 Create platform-specific tests for service installation
   - [ ] 8.5 Write user documentation and configuration guides
   - [ ] 8.6 Create deployment package with installation scripts
+
+## Current Status
+
+**Completed Phases:**
+- ✅ **Phase 1.0**: Core Service Infrastructure (100%)
+- ✅ **Phase 2.0**: Directory Monitoring and File Detection (100%)
+- ✅ **Phase 3.0**: Service Configuration and Settings (33% - Core validation complete)
+
+**Current Focus:**
+- **Phase 4.0**: Service Processing and Integration
+- **Next Task**: 4.1 Integrate SubtitleService with background service for file processing
+
+**Key Achievements:**
+- Removed all GUI dependencies and focused on service-only development
+- Extended configuration system with comprehensive service settings
+- Implemented robust service configuration validation
+- Created service communication system for component interaction
+- Built health monitoring and crash recovery mechanisms
+- Established file tracking system with SQLite database
 
 ## Relevant Files
 
