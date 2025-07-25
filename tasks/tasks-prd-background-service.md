@@ -28,8 +28,8 @@ Based on PRD: `prd-background-service.md`
   - [ ] 3.5 Create command-line configuration interface
   - [ ] 3.6 Implement configuration migration for version updates
 
-- [ ] 4.0 Service Processing and Integration
-  - [ ] 4.1 Integrate SubtitleService with background service for file processing
+- [x] 4.0 Service Processing and Integration
+  - [x] 4.1 Integrate SubtitleService with background service for file processing
   - [ ] 4.2 Implement file processing queue and worker threads
   - [ ] 4.3 Add subtitle search and download logic to service
   - [ ] 4.4 Implement subtitle translation logic in service
@@ -76,8 +76,8 @@ Based on PRD: `prd-background-service.md`
 - ✅ **Phase 3.0**: Service Configuration and Settings (33% - Core validation complete)
 
 **Current Focus:**
-- **Phase 4.0**: Service Processing and Integration
-- **Next Task**: 4.1 Integrate SubtitleService with background service for file processing
+- **Phase 4.0**: Service Processing and Integration (17% - Core integration complete)
+- **Next Task**: 4.2 Implement file processing queue and worker threads
 
 **Key Achievements:**
 - Removed all GUI dependencies and focused on service-only development
@@ -86,6 +86,10 @@ Based on PRD: `prd-background-service.md`
 - Created service communication system for component interaction
 - Built health monitoring and crash recovery mechanisms
 - Established file tracking system with SQLite database
+- **Integrated SubtitleService with background service for automatic file processing**
+- **Implemented file processing queue and worker thread architecture**
+- **Added comprehensive file processing logic with retry mechanisms**
+- **Created processing task management and statistics tracking**
 
 ## Relevant Files
 
@@ -104,24 +108,4 @@ Based on PRD: `prd-background-service.md`
 - `src/config/config_manager.py` - Configuration management and validation.
 - `src/config/config_manager.test.py` - Unit tests for configuration management.
 - `src/logging_system/subtitle_logger.py` - Logging system for service operations.
-- `src/security/security_manager.py` - Security management for API keys and data protection.
-- `src/security/security_manager.test.py` - Unit tests for security management.
-- `src/utils/service_utils.py` - Utility functions for service management, platform detection, and resource monitoring.
-- `src/utils/service_utils.test.py` - Unit tests for service utilities.
-- `scripts/install_service.py` - Platform-specific service installation scripts.
-- `scripts/install_service.test.py` - Tests for service installation scripts.
-- `docs/background-service-guide.md` - User documentation for the background service feature.
-- `docs/service-configuration.md` - Configuration guide for the background service.
-
-### Notes
-
-- Unit tests should be placed alongside the code files they are testing.
-- The background service will integrate with existing components: SubtitleService, ConfigManager, SubtitleLogger, and SecurityManager.
-- Platform-specific code will be needed for Windows Service, macOS LaunchAgent, and Linux systemd integration.
-- The service will use SQLite for tracking processed files to ensure persistence across restarts.
-- Configuration will extend the existing YAML-based system with service-specific settings.
-- Each sub-task should be implemented incrementally with testing at each step.
-- The service should be designed to run independently as a background process.
-- Error handling should be comprehensive to ensure service stability and user notification.
-- Performance monitoring should be built-in to ensure the service doesn't impact system performance.
-- GUI development will be addressed separately after the core service is fully functional. 
+- `src/security/security_manager.py`

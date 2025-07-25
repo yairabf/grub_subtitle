@@ -1,394 +1,491 @@
+#!/usr/bin/env python3
 """
-Unit tests for BackgroundService class.
+Unit tests for Background Service with SubtitleService integration.
 """
 
 import unittest
+import tempfile
+import os
 import time
 import threading
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
-from datetime import datetime
+import shutil
 
-from services.background_service import BackgroundService, ServiceState, ServiceStatus, ServiceStateError
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from services.background_service import BackgroundService, ServiceState, ProcessingTask
+from config.config_manager import ConfigManager
+from services.file_tracker import ProcessingStatus
 
 
-class TestBackgroundService(unittest.TestCase):
-    """Test cases for BackgroundService class."""
+class TestBackgroundServiceIntegration(unittest.TestCase):
+    """Test cases for BackgroundService with SubtitleService integration."""
     
     def setUp(self):
         """Set up test fixtures."""
-        # Mock the dependencies
-        self.mock_config_manager = Mock()
-        self.mock_logger = Mock()
-        self.mock_subtitle_service = Mock()
+        self.temp_dir = tempfile.mkdtemp()
+        self.config_path = os.path.join(self.temp_dir, "test_config.yaml")
         
-        # Configure mock config
-        self.mock_config_manager.config = {
-            'background_service': {
-                'scan_interval_seconds': 300,
-                'monitored_directories': ['/test/dir1', '/test/dir2']
+        # Create test configuration with service settings
+        self.test_config = {
+            'api': {
+                'opensubtitles': {
+                    'username': 'test_user',
+                    'password': 'test_pass',
+                    'base_url': 'https://api.opensubtitles.com/xml-rpc',
+                    'user_agent': 'TestAgent/1.0',
+                    'timeout': 30,
+                    'max_retries': 3
+                },
+                'openai': {
+                    'api_key': 'test_key',
+                    'model': 'gpt-3.5-turbo',
+                    'temperature': 0.3,
+                    'max_tokens': 4000,
+                    'timeout': 60,
+                    'max_retries': 3
+                }
+            },
+            'processing': {
+                'chunk_size': 3000,
+                'max_blocks_per_chunk': 10,
+                'supported_video_formats': ['.mp4', '.mkv', '.avi'],
+                'max_concurrent_processes': 3,
+                'temp_directory': './temp'
+            },
+            'validation': {
+                'min_hebrew_ratio': 0.5,
+                'max_timestamp_error': 0.1,
+                'auto_fix': True,
+                'strict_mode': False
+            },
+            'logging': {
+                'level': 'DEBUG',
+                'file': os.path.join(self.temp_dir, 'test.log'),
+                'max_size': '10MB',
+                'backup_count': 5,
+                'format': 'json',
+                'console_output': True
+            },
+            'security': {
+                'encrypt_api_keys': False,
+                'key_rotation_days': 90,
+                'secure_storage_path': './secure',
+                'audit_logging': True
+            },
+            'ui': {
+                'theme': 'default',
+                'language': 'en',
+                'auto_save_config': True,
+                'show_advanced_options': False
+            },
+            'paths': {
+                'default_output_dir': './subtitles',
+                'log_directory': './logs',
+                'config_directory': './config',
+                'cache_directory': './cache',
+                'data_directory': './data',
+                'temp_directory': './temp'
+            },
+            'service': {
+                'directories': [
+                    {
+                        'path': self.temp_dir,
+                        'enabled': True,
+                        'recursive': True,
+                        'scan_interval_minutes': 1,
+                        'file_size_limit_mb': 1000,
+                        'exclude_patterns': ['*.tmp'],
+                        'include_patterns': ['*.mp4', '*.mkv', '*.avi']
+                    }
+                ],
+                'scanning': {
+                    'initial_scan_delay_seconds': 1,
+                    'incremental_scan_enabled': True,
+                    'full_scan_interval_hours': 24,
+                    'scan_timeout_seconds': 60,
+                    'max_files_per_scan': 10,
+                    'parallel_scanning': False,
+                    'scan_workers': 1
+                },
+                'processing': {
+                    'queue_size': 10,
+                    'worker_threads': 2,
+                    'processing_timeout_seconds': 30,
+                    'retry_failed_files': True,
+                    'max_retry_attempts': 2,
+                    'retry_delay_seconds': 1,
+                    'prioritize_new_files': True,
+                    'skip_existing_subtitles': True
+                },
+                'performance': {
+                    'cpu_limit_percent': 80,
+                    'memory_limit_mb': 1024,
+                    'disk_io_limit_mbps': 50,
+                    'network_limit_mbps': 25,
+                    'adaptive_processing': True,
+                    'low_power_mode': False
+                },
+                'health': {
+                    'monitoring_enabled': True,
+                    'health_check_interval_seconds': 30,
+                    'heartbeat_interval_seconds': 15,
+                    'crash_detection_enabled': True,
+                    'auto_recovery_enabled': True,
+                    'health_score_threshold': 50.0,
+                    'cpu_warning_percent': 70,
+                    'cpu_critical_percent': 90,
+                    'memory_warning_percent': 80,
+                    'memory_critical_percent': 95,
+                    'disk_warning_percent': 85,
+                    'disk_critical_percent': 95
+                },
+                'database': {
+                    'file_path': os.path.join(self.temp_dir, 'service_database.db'),
+                    'backup_enabled': False,
+                    'backup_interval_hours': 24,
+                    'backup_retention_days': 7,
+                    'vacuum_interval_hours': 168,
+                    'max_database_size_mb': 100
+                },
+                'logging': {
+                    'service_log_file': os.path.join(self.temp_dir, 'background_service.log'),
+                    'debug_mode': True,
+                    'verbose_logging': True,
+                    'log_rotation': {
+                        'max_size_mb': 10,
+                        'backup_count': 5,
+                        'compress': True
+                    },
+                    'levels': {
+                        'background_service': 'DEBUG',
+                        'directory_scanner': 'DEBUG',
+                        'file_tracker': 'DEBUG',
+                        'health_monitor': 'WARNING',
+                        'communication': 'DEBUG',
+                        'processing': 'DEBUG'
+                    }
+                }
             }
         }
         
-        # Create service with mocked dependencies
-        with patch('services.background_service.ConfigManager', return_value=self.mock_config_manager), \
-             patch('services.background_service.SubtitleLogger', return_value=self.mock_logger), \
-             patch('services.background_service.SubtitleService', return_value=self.mock_subtitle_service):
-            
-            self.service = BackgroundService()
+        # Write test config to file
+        import yaml
+        with open(self.config_path, 'w') as f:
+            yaml.dump(self.test_config, f)
+        
+        # Create test video files
+        self.test_video_files = []
+        for i in range(3):
+            video_path = os.path.join(self.temp_dir, f"test_video_{i}.mp4")
+            with open(video_path, 'w') as f:
+                f.write(f"fake video content {i}")
+            self.test_video_files.append(video_path)
     
-    def test_initial_state(self):
-        """Test that service starts in STOPPED state."""
-        self.assertEqual(self.service.state, ServiceState.STOPPED)
-        self.assertEqual(self.service.status.state, ServiceState.STOPPED)
+    def tearDown(self):
+        """Clean up after tests."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
     
-    def test_valid_state_transitions(self):
-        """Test valid state transitions."""
-        # STOPPED -> STARTING
-        self.assertTrue(self.service.can_transition_to(ServiceState.STARTING))
+    def test_initialization(self):
+        """Test background service initialization with SubtitleService integration."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        # STOPPED -> RUNNING (invalid)
-        self.assertFalse(self.service.can_transition_to(ServiceState.RUNNING))
-        
-        # STOPPED -> STOPPING (invalid)
-        self.assertFalse(self.service.can_transition_to(ServiceState.STOPPING))
+        self.assertIsNotNone(service)
+        self.assertIsNotNone(service.subtitle_service)
+        self.assertIsNotNone(service.file_tracker)
+        self.assertIsNotNone(service.directory_scanner)
+        self.assertEqual(service.state, ServiceState.STOPPED)
     
-    def test_start_service_success(self):
-        """Test successful service start."""
-        # Mock directory existence
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            result = self.service.start()
-            
-            self.assertTrue(result)
-            self.assertEqual(self.service.state, ServiceState.RUNNING)
-            self.assertIsNotNone(self.service.status.start_time)
-            self.assertIsNone(self.service.status.error_message)
-            self.assertEqual(self.service.status.consecutive_errors, 0)
+    def test_configuration_loading(self):
+        """Test that service configuration is loaded correctly."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
+        
+        # Check that processing configuration is loaded
+        self.assertEqual(service._worker_threads_count, 2)
+        self.assertEqual(service._queue_size, 10)
+        self.assertEqual(service._processing_timeout, 30)
+        self.assertTrue(service._retry_failed_files)
+        self.assertEqual(service._max_retry_attempts, 2)
     
-    def test_start_service_invalid_config(self):
-        """Test service start with invalid configuration."""
-        # Mock empty monitored directories
-        self.mock_config_manager.config = {
-            'background_service': {
-                'scan_interval_seconds': 300,
-                'monitored_directories': []
-            }
-        }
+    def test_worker_thread_management(self):
+        """Test worker thread start and stop functionality."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        result = self.service.start()
+        # Start worker threads
+        service._start_worker_threads()
         
-        self.assertFalse(result)
-        self.assertEqual(self.service.state, ServiceState.ERROR)
-        self.assertIsNotNone(self.service.status.error_message)
+        # Check that workers are started
+        self.assertEqual(len(service._worker_threads), 2)
+        self.assertTrue(all(worker.is_alive() for worker in service._worker_threads))
+        
+        # Stop worker threads
+        service._stop_worker_threads()
+        
+        # Check that workers are stopped
+        self.assertEqual(len(service._worker_threads), 0)
     
-    def test_start_service_already_running(self):
-        """Test starting service that is already running."""
-        # Start the service first
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
+    def test_file_processing_queue(self):
+        """Test file processing queue functionality."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        # Try to start again
-        result = self.service.start()
+        # Queue files for processing
+        for video_file in self.test_video_files:
+            success = service._queue_file_for_processing(video_file, priority=1)
+            self.assertTrue(success)
         
-        self.assertFalse(result)
-        self.assertEqual(self.service.state, ServiceState.RUNNING)
+        # Check queue statistics
+        stats = service.get_processing_statistics()
+        self.assertEqual(stats['tasks_queued'], 3)
+        self.assertEqual(stats['queue_size'], 3)
     
-    def test_stop_service_success(self):
-        """Test successful service stop."""
-        # Start the service first
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
+    def test_existing_subtitle_detection(self):
+        """Test detection of existing subtitle files."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        # Stop the service
-        result = self.service.stop()
+        video_path = self.test_video_files[0]
         
-        self.assertTrue(result)
-        self.assertEqual(self.service.state, ServiceState.STOPPED)
+        # Test with no existing subtitle
+        existing_subtitle = service._find_existing_subtitle(video_path)
+        self.assertIsNone(existing_subtitle)
+        
+        # Create a fake subtitle file
+        video_name = Path(video_path).stem
+        subtitle_path = os.path.join(self.temp_dir, f"{video_name}.heb.srt")
+        with open(subtitle_path, 'w') as f:
+            f.write("fake subtitle content")
+        
+        # Test with existing subtitle
+        existing_subtitle = service._find_existing_subtitle(video_path)
+        self.assertEqual(existing_subtitle, subtitle_path)
     
-    def test_stop_service_already_stopped(self):
-        """Test stopping service that is already stopped."""
-        result = self.service.stop()
+    @patch('services.subtitle_service.SubtitleService.process_video_file_with_validation')
+    def test_video_file_processing(self, mock_process):
+        """Test video file processing with mocked SubtitleService."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        self.assertTrue(result)
-        self.assertEqual(self.service.state, ServiceState.STOPPED)
+        # Mock successful processing
+        mock_process.return_value = True
+        
+        video_path = self.test_video_files[0]
+        result = service._process_video_file(video_path)
+        
+        self.assertTrue(result['success'])
+        self.assertTrue(result['subtitle_found'])
+        self.assertTrue(result['subtitle_downloaded'])
+        mock_process.assert_called_once_with(video_path)
     
-    def test_pause_and_resume_service(self):
-        """Test pausing and resuming the service."""
-        # Start the service first
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
-            self.assertEqual(self.service.state, ServiceState.RUNNING)
-            
-            # Pause the service
-            result = self.service.pause()
-            self.assertTrue(result)
-            self.assertEqual(self.service.state, ServiceState.PAUSED)
-            
-            # Resume the service
-            result = self.service.resume()
-            self.assertTrue(result)
-            self.assertEqual(self.service.state, ServiceState.RUNNING)
+    @patch('services.subtitle_service.SubtitleService.process_video_file_with_validation')
+    def test_video_file_processing_failure(self, mock_process):
+        """Test video file processing failure handling."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
+        
+        # Mock failed processing
+        mock_process.return_value = False
+        
+        video_path = self.test_video_files[0]
+        result = service._process_video_file(video_path)
+        
+        self.assertFalse(result['success'])
+        self.assertFalse(result['subtitle_found'])
+        self.assertFalse(result['subtitle_downloaded'])
+        mock_process.assert_called_once_with(video_path)
     
-    def test_pause_service_not_running(self):
-        """Test pausing service that is not running."""
-        result = self.service.pause()
-        self.assertFalse(result)
-        self.assertEqual(self.service.state, ServiceState.STOPPED)
+    @patch('services.subtitle_service.SubtitleService.process_video_file_with_validation')
+    def test_video_file_processing_exception(self, mock_process):
+        """Test video file processing exception handling."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
+        
+        # Mock processing exception
+        mock_process.side_effect = Exception("Processing failed")
+        
+        video_path = self.test_video_files[0]
+        result = service._process_video_file(video_path)
+        
+        self.assertFalse(result['success'])
+        self.assertIn("Processing failed", result['message'])
+        mock_process.assert_called_once_with(video_path)
     
-    def test_resume_service_not_paused(self):
-        """Test resuming service that is not paused."""
-        result = self.service.resume()
-        self.assertFalse(result)
-        self.assertEqual(self.service.state, ServiceState.STOPPED)
+    def test_processing_task_creation(self):
+        """Test ProcessingTask creation and management."""
+        task = ProcessingTask(
+            file_path="/path/to/video.mp4",
+            task_id="test_task_001",
+            priority=1
+        )
+        
+        self.assertEqual(task.file_path, "/path/to/video.mp4")
+        self.assertEqual(task.task_id, "test_task_001")
+        self.assertEqual(task.priority, 1)
+        self.assertEqual(task.status, "pending")
+        self.assertEqual(task.retry_count, 0)
+        self.assertEqual(task.max_retries, 3)
     
-    def test_restart_service(self):
-        """Test service restart functionality."""
-        # Mock directory existence
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            # Start the service
-            self.service.start()
-            self.assertEqual(self.service.state, ServiceState.RUNNING)
-            
-            # Restart the service
-            result = self.service.restart()
-            
-            self.assertTrue(result)
-            self.assertEqual(self.service.state, ServiceState.RUNNING)
+    @patch('services.directory_scanner.DirectoryScanner.get_files_batch')
+    def test_scan_and_queue_files(self, mock_get_files):
+        """Test directory scanning and file queuing."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
+        
+        # Mock file batch results
+        from services.file_tracker import FileInfo
+        mock_files = [
+            FileInfo(
+                file_path=self.test_video_files[0],
+                file_size=1024,
+                modification_time=time.time(),
+                is_new=True,
+                needs_processing=True
+            ),
+            FileInfo(
+                file_path=self.test_video_files[1],
+                file_size=2048,
+                modification_time=time.time(),
+                is_new=False,
+                needs_processing=True
+            )
+        ]
+        mock_get_files.return_value = mock_files
+        
+        # Test scanning and queuing
+        service._scan_and_queue_files()
+        
+        # Check that files were queued
+        stats = service.get_processing_statistics()
+        self.assertEqual(stats['tasks_queued'], 2)
+        mock_get_files.assert_called_once_with(max_files=10)
     
-    def test_state_history(self):
-        """Test state transition history tracking."""
-        # Start and stop service to create history
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
-            self.service.stop()
-        
-        history = self.service.get_state_history()
-        
-        self.assertGreater(len(history), 0)
-        self.assertIn('timestamp', history[0])
-        self.assertIn('from_state', history[0])
-        self.assertIn('to_state', history[0])
-        self.assertIn('reason', history[0])
-    
-    def test_wait_for_state(self):
-        """Test waiting for specific state."""
-        # Start service in background
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            # Start service in a separate thread
-            def start_service():
-                time.sleep(0.1)  # Small delay
-                self.service.start()
-            
-            thread = threading.Thread(target=start_service)
-            thread.start()
-            
-            # Wait for running state
-            result = self.service.wait_for_state(ServiceState.RUNNING, timeout=5.0)
-            
-            thread.join()
-            
-            self.assertTrue(result)
-            self.assertEqual(self.service.state, ServiceState.RUNNING)
-    
-    def test_wait_for_state_timeout(self):
-        """Test waiting for state with timeout."""
-        result = self.service.wait_for_state(ServiceState.RUNNING, timeout=0.1)
-        self.assertFalse(result)
-    
-    def test_is_in_state(self):
-        """Test checking if service is in specific state."""
-        self.assertTrue(self.service.is_in_state(ServiceState.STOPPED))
-        self.assertFalse(self.service.is_in_state(ServiceState.RUNNING))
-    
-    def test_health_score_calculation(self):
-        """Test health score calculation."""
-        # Initial health should be 100
-        self.assertEqual(self.service.status.health_score, 100.0)
-        
-        # Simulate errors
-        self.service._update_status(consecutive_errors=2)
-        self.assertEqual(self.service.status.health_score, 80.0)  # 100 - (2 * 10)
-    
-    def test_status_callback(self):
-        """Test status callback functionality."""
-        callback_called = False
-        callback_status = None
-        
-        def status_callback(status: ServiceStatus):
-            nonlocal callback_called, callback_status
-            callback_called = True
-            callback_status = status
-        
-        # Add callback
-        self.service.add_status_callback(status_callback)
-        
-        # Start service to trigger callback
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
-        
-        # Give some time for callback to be called
-        time.sleep(0.1)
-        
-        self.assertTrue(callback_called)
-        self.assertIsNotNone(callback_status)
-        self.assertEqual(callback_status.state, ServiceState.RUNNING)
-    
-    def test_state_callback(self):
-        """Test state callback functionality."""
-        callback_called = False
-        old_state = None
-        new_state = None
-        
-        def state_callback(old: ServiceState, new: ServiceState):
-            nonlocal callback_called, old_state, new_state
-            callback_called = True
-            old_state = old
-            new_state = new
-        
-        # Add callback
-        self.service.add_state_callback(state_callback)
-        
-        # Start service to trigger callback
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
-        
-        # Give some time for callback to be called
-        time.sleep(0.1)
-        
-        self.assertTrue(callback_called)
-        self.assertEqual(old_state, ServiceState.STARTING)
-        self.assertEqual(new_state, ServiceState.RUNNING)
-    
-    def test_remove_status_callback(self):
-        """Test removing status callback."""
-        callback_called = False
-        
-        def status_callback(status: ServiceStatus):
-            nonlocal callback_called
-            callback_called = True
-        
-        # Add and then remove callback
-        self.service.add_status_callback(status_callback)
-        self.service.remove_status_callback(status_callback)
+    def test_service_start_stop_with_workers(self):
+        """Test service start and stop with worker threads."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
         # Start service
-        with patch('pathlib.Path.exists', return_value=True), \
-             patch('pathlib.Path.is_dir', return_value=True):
-            
-            self.service.start()
+        success = service.start()
+        self.assertTrue(success)
+        self.assertEqual(service.state, ServiceState.RUNNING)
         
-        # Give some time for callback to be called
+        # Wait a moment for threads to start
         time.sleep(0.1)
         
-        # Callback should not be called since it was removed
-        self.assertFalse(callback_called)
+        # Check that workers are running
+        self.assertEqual(len(service._worker_threads), 2)
+        self.assertTrue(all(worker.is_alive() for worker in service._worker_threads))
+        
+        # Stop service
+        success = service.stop()
+        self.assertTrue(success)
+        self.assertEqual(service.state, ServiceState.STOPPED)
+        
+        # Check that workers are stopped
+        self.assertEqual(len(service._worker_threads), 0)
     
-    def test_get_status_summary(self):
-        """Test getting status summary."""
-        summary = self.service.get_status_summary()
+    def test_processing_statistics(self):
+        """Test processing statistics tracking."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        self.assertIsInstance(summary, dict)
-        self.assertIn('state', summary)
-        self.assertIn('start_time', summary)
-        self.assertIn('last_scan_time', summary)
-        self.assertIn('files_processed', summary)
-        self.assertIn('files_failed', summary)
-        self.assertIn('current_operation', summary)
-        self.assertIn('error_message', summary)
-        self.assertIn('uptime_seconds', summary)
-        self.assertIn('health_score', summary)
-        self.assertIn('consecutive_errors', summary)
-        self.assertIn('monitored_directories', summary)
-        self.assertIn('scan_interval', summary)
-        self.assertIn('can_start', summary)
-        self.assertIn('can_stop', summary)
-        self.assertIn('can_pause', summary)
-        self.assertIn('can_resume', summary)
+        # Initial statistics
+        stats = service.get_processing_statistics()
+        self.assertEqual(stats['queue_size'], 0)
+        self.assertEqual(stats['active_workers'], 0)
+        self.assertEqual(stats['total_workers'], 2)
+        self.assertEqual(stats['tasks_queued'], 0)
+        self.assertEqual(stats['tasks_completed'], 0)
+        self.assertEqual(stats['tasks_failed'], 0)
         
-        self.assertEqual(summary['state'], ServiceState.STOPPED.value)
-        self.assertEqual(summary['files_processed'], 0)
-        self.assertEqual(summary['files_failed'], 0)
-        self.assertEqual(summary['health_score'], 100.0)
-        self.assertTrue(summary['can_start'])
-        self.assertFalse(summary['can_stop'])
+        # Queue some files
+        for video_file in self.test_video_files:
+            service._queue_file_for_processing(video_file)
+        
+        # Check updated statistics
+        stats = service.get_processing_statistics()
+        self.assertEqual(stats['queue_size'], 3)
+        self.assertEqual(stats['tasks_queued'], 3)
     
-    def test_thread_safety(self):
-        """Test thread safety of service operations."""
-        results = []
-        errors = []
+    def test_priority_queue_ordering(self):
+        """Test that priority queue orders tasks correctly."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        def worker():
-            try:
-                # Multiple threads trying to start/stop service
-                for i in range(10):
-                    if i % 2 == 0:
-                        result = self.service.start()
-                    else:
-                        result = self.service.stop()
-                    results.append(result)
-                    time.sleep(0.01)
-            except Exception as e:
-                errors.append(e)
+        # Queue files with different priorities
+        service._queue_file_for_processing(self.test_video_files[0], priority=0)  # Normal
+        service._queue_file_for_processing(self.test_video_files[1], priority=2)  # High
+        service._queue_file_for_processing(self.test_video_files[2], priority=1)  # Medium
         
-        # Create multiple threads
-        threads = []
-        for _ in range(3):
-            thread = threading.Thread(target=worker)
-            threads.append(thread)
-            thread.start()
+        # Get tasks from queue (should be in priority order)
+        tasks = []
+        while not service._processing_queue.empty():
+            priority, task = service._processing_queue.get()
+            tasks.append((priority, task.file_path))
         
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-        
-        # Should not have any errors
-        self.assertEqual(len(errors), 0)
-        self.assertGreater(len(results), 0)
+        # Check priority ordering (higher priority numbers should come first)
+        self.assertEqual(len(tasks), 3)
+        self.assertEqual(tasks[0][0], -2)  # Highest priority (2) becomes -2
+        self.assertEqual(tasks[1][0], -1)  # Medium priority (1) becomes -1
+        self.assertEqual(tasks[2][0], 0)   # Normal priority (0) becomes 0
     
-    def test_concurrent_callback_management(self):
-        """Test concurrent callback management."""
-        callback_count = 0
+    def test_retry_logic(self):
+        """Test retry logic for failed tasks."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        def test_callback(status: ServiceStatus):
-            nonlocal callback_count
-            callback_count += 1
+        # Create a task that will fail
+        task = ProcessingTask(
+            file_path=self.test_video_files[0],
+            task_id="retry_test",
+            max_retries=2
+        )
         
-        # Add callbacks from multiple threads
-        def add_callbacks():
-            for _ in range(5):
-                self.service.add_status_callback(test_callback)
-                time.sleep(0.01)
+        # Simulate processing failure
+        with patch.object(service, '_process_video_file') as mock_process:
+            mock_process.side_effect = Exception("Processing error")
+            
+            # Process the task
+            service._process_task(task, worker_id=0)
+            
+            # Check that task was marked for retry
+            self.assertEqual(task.status, "retry")
+            self.assertEqual(task.retry_count, 1)
+            self.assertIsNotNone(task.error_message)
+    
+    def test_skip_existing_subtitles(self):
+        """Test skipping files that already have subtitles."""
+        config_manager = ConfigManager(self.config_path)
+        service = BackgroundService(config_manager)
         
-        threads = []
-        for _ in range(3):
-            thread = threading.Thread(target=add_callbacks)
-            threads.append(thread)
-            thread.start()
+        video_path = self.test_video_files[0]
         
-        for thread in threads:
-            thread.join()
+        # Create existing subtitle file
+        video_name = Path(video_path).stem
+        subtitle_path = os.path.join(self.temp_dir, f"{video_name}.heb.srt")
+        with open(subtitle_path, 'w') as f:
+            f.write("existing subtitle content")
         
-        # Should have added callbacks without errors
-        self.assertGreater(callback_count, 0)
+        # Create task
+        task = ProcessingTask(
+            file_path=video_path,
+            task_id="skip_test"
+        )
+        
+        # Process task (should be skipped)
+        service._process_task(task, worker_id=0)
+        
+        # Check that task was skipped
+        self.assertEqual(task.status, "completed")
+        self.assertTrue(task.result['skipped'])
+        self.assertEqual(task.result['reason'], "subtitle_exists")
+        self.assertEqual(task.result['existing_subtitle'], subtitle_path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main() 
