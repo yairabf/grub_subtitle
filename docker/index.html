@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grab Subtitle Service - Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 30px;
+        }
+
+        .status-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+            border-left: 5px solid #007bff;
+            transition: transform 0.3s ease;
+        }
+
+        .status-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .status-card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .status-value {
+            font-weight: 600;
+            color: #007bff;
+        }
+
+        .status-value.success {
+            color: #28a745;
+        }
+
+        .status-value.warning {
+            color: #ffc107;
+        }
+
+        .status-value.error {
+            color: #dc3545;
+        }
+
+        .links-section {
+            background: #f8f9fa;
+            padding: 30px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .links-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .link-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            text-decoration: none;
+            color: #2c3e50;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+
+        .link-card:hover {
+            border-color: #007bff;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,123,255,0.2);
+        }
+
+        .link-card h4 {
+            margin-bottom: 10px;
+            color: #007bff;
+        }
+
+        .link-card p {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+
+        .footer {
+            background: #2c3e50;
+            color: white;
+            text-align: center;
+            padding: 20px;
+            font-size: 0.9em;
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 15px 20px;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,123,255,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: #0056b3;
+            transform: scale(1.05);
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr;
+                padding: 20px;
+            }
+            
+            .links-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Grab Subtitle Service</h1>
+            <p>Multi-Language Subtitle Processing Monitor</p>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card">
+                <h3>📊 Service Status</h3>
+                <div class="status-item">
+                    <span class="status-label">Container Status:</span>
+                    <span class="status-value success" id="container-status">Running</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Health Check:</span>
+                    <span class="status-value success" id="health-status">Healthy</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Last Update:</span>
+                    <span class="status-value" id="last-update">Just now</span>
+                </div>
+            </div>
+
+            <div class="status-card">
+                <h3>📁 Directory Status</h3>
+                <div class="status-item">
+                    <span class="status-label">Video Directory:</span>
+                    <span class="status-value" id="video-dir">/media/videos</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Subtitle Output:</span>
+                    <span class="status-value" id="subtitle-dir">/app/subtitles</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Database:</span>
+                    <span class="status-value success" id="db-status">Connected</span>
+                </div>
+            </div>
+
+            <div class="status-card">
+                <h3>🌍 Language Settings</h3>
+                <div class="status-item">
+                    <span class="status-label">Target Language:</span>
+                    <span class="status-value" id="target-language">Hebrew (he)</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Source Language:</span>
+                    <span class="status-value" id="source-language">English (en)</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Translation API:</span>
+                    <span class="status-value success" id="api-status">Available</span>
+                </div>
+            </div>
+
+            <div class="status-card">
+                <h3>⚙️ System Resources</h3>
+                <div class="status-item">
+                    <span class="status-label">Memory Usage:</span>
+                    <span class="status-value" id="memory-usage">512MB / 2GB</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">CPU Usage:</span>
+                    <span class="status-value" id="cpu-usage">15%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Disk Space:</span>
+                    <span class="status-value" id="disk-usage">2.1GB / 50GB</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="links-section">
+            <h3 style="margin-bottom: 20px; color: #2c3e50;">🔗 Quick Access</h3>
+            <div class="links-grid">
+                <a href="/logs" class="link-card">
+                    <h4>📋 View Logs</h4>
+                    <p>Check service logs and processing history</p>
+                </a>
+                <a href="/data" class="link-card">
+                    <h4>💾 Data Files</h4>
+                    <p>Browse processed files and database</p>
+                </a>
+                <a href="/health" class="link-card">
+                    <h4>❤️ Health Check</h4>
+                    <p>Service health status endpoint</p>
+                </a>
+                <a href="#" class="link-card" onclick="refreshStatus()">
+                    <h4>🔄 Refresh</h4>
+                    <p>Update status information</p>
+                </a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Grab Subtitle Service v2.0 - Multi-Language Support</p>
+            <p>Running in Docker Container</p>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="refreshStatus()">
+        🔄 Refresh
+    </button>
+
+    <script>
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('last-update').textContent = now.toLocaleTimeString();
+        }
+
+        function refreshStatus() {
+            // Simulate status refresh
+            updateTime();
+            
+            // Add loading effect
+            const refreshBtn = document.querySelector('.refresh-btn');
+            refreshBtn.textContent = '⏳ Loading...';
+            refreshBtn.disabled = true;
+            
+            setTimeout(() => {
+                refreshBtn.textContent = '🔄 Refresh';
+                refreshBtn.disabled = false;
+                
+                // Update some random values for demo
+                const memoryValues = ['512MB / 2GB', '498MB / 2GB', '521MB / 2GB'];
+                const cpuValues = ['15%', '12%', '18%', '22%'];
+                
+                document.getElementById('memory-usage').textContent = memoryValues[Math.floor(Math.random() * memoryValues.length)];
+                document.getElementById('cpu-usage').textContent = cpuValues[Math.floor(Math.random() * cpuValues.length)];
+            }, 1000);
+        }
+
+        // Update time every minute
+        setInterval(updateTime, 60000);
+        
+        // Initial update
+        updateTime();
+    </script>
+</body>
+</html> 

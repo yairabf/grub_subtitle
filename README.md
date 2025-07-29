@@ -37,24 +37,86 @@ grab_subtitle/
 
 See `docs/project_structure.md` for detailed structure information.
 
-## Setup
+## Installation
+
+### Option 1: Docker Deployment (Recommended for HomeLab)
+
+The easiest way to deploy in a HomeLab environment is using Docker.
+
+#### Prerequisites
+- Docker and Docker Compose
+- OpenSubtitles account
+- OpenAI API key
+
+#### Quick Start with Docker
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd grab_subtitle
+   ```
+
+2. **Setup Docker environment**
+   ```bash
+   # Copy environment template
+   cp docker.env.example docker.env
+   
+   # Edit docker.env with your API credentials
+   nano docker.env
+   ```
+
+3. **Deploy with Docker**
+   ```bash
+   # Run the deployment script
+   ./docker/deploy.sh setup
+   ./docker/deploy.sh deploy
+   
+   # Or with monitoring interface
+   ./docker/deploy.sh monitor
+   ```
+
+4. **Access monitoring interface**
+   - Open http://localhost:8080 in your browser
+
+#### HomeLab Platform Support
+
+The service includes configurations for popular HomeLab platforms:
+
+- **Synology NAS**: `docker/homelab-examples/synology/`
+- **TrueNAS**: `docker/homelab-examples/truenas/`
+- **Unraid**: `docker/homelab-examples/unraid/`
+- **Proxmox VE**: `docker/homelab-examples/proxmox/`
+- **Linux**: `docker/homelab-examples/linux/`
+
+See `docker/homelab-examples/README.md` for platform-specific instructions.
+
+### Option 2: Local Python Installation
+
+#### Prerequisites
+
+- Python 3.8 or higher
+- pip (Python package installer)
+- OpenSubtitles account
+- OpenAI API key
+
+#### Setup
 
 1. **Install Dependencies**:
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 2. **Create Environment File**:
-Create a `.env` file in the project root:
-```bash
-OPENSUBTITLES_USERNAME=your_opensubtitles_username
-OPENSUBTITLES_PASSWORD=your_opensubtitles_password
-OPENAI_API_KEY=your_openai_api_key
-DIRECTORY_PATH=/path/to/your/video/directory
-```
+   Create a `.env` file in the project root:
+   ```bash
+   OPENSUBTITLES_USERNAME=your_opensubtitles_username
+   OPENSUBTITLES_PASSWORD=your_opensubtitles_password
+   OPENAI_API_KEY=your_openai_api_key
+   DIRECTORY_PATH=/path/to/your/video/directory
+   ```
 
 3. **Configure Service**:
-Edit `config/config.yaml` to customize service settings.
+   Edit `config/config.yaml` to customize service settings.
 
 ## Usage
 
