@@ -31,7 +31,15 @@ def main():
         print("Please set OPENAI_API_KEY in your .env file")
         return
 
-    service = SubtitleService(opensubtitles_username, opensubtitles_password, openai_api_key)
+    # Get target language from environment or config
+    target_language = os.getenv('TARGET_LANGUAGE', 'he')
+    
+    service = SubtitleService(
+        opensubtitles_username=opensubtitles_username, 
+        opensubtitles_password=opensubtitles_password, 
+        openai_api_key=openai_api_key,
+        target_language=target_language
+    )
     
     # Handle validation-only mode
     if args.validate_only:

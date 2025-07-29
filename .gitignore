@@ -50,10 +50,14 @@ secure/
 *.pem
 *.crt
 
-# Test files
+# Test files and temporary test data
 test_*.py
 *_test.py
 example_*.py
+test_*.srt
+test_*.mkv
+test_*.mp4
+test_*.avi
 
 # Temporary files
 *.tmp
@@ -68,7 +72,60 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+data/*.db
 
 # Backup files
 *.bak
-*.backup 
+*.backup
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json 

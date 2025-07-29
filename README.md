@@ -1,206 +1,232 @@
-# TV Show Subtitle Service
+# Grab Subtitle - Multi-Language Subtitle Service
 
-This service automatically downloads and translates subtitles for TV show episodes. It first attempts to find Hebrew subtitles, and if none are available, it downloads English subtitles and translates them to Hebrew using OpenAI's translation capabilities.
+This service automatically downloads and translates subtitles for video files. It first attempts to find subtitles in your target language, and if none are available, it downloads English subtitles and translates them to your desired language using OpenAI's translation capabilities.
 
 ## Features
 
-- Automatically processes all video files in a directory
-- Searches for Hebrew subtitles first
-- Falls back to English subtitles with translation if Hebrew is not available
-- **Hebrew subtitle validation and quality assurance**
-- Supports multiple video formats (mp4, mkv, avi, mov, wmv, flv, webm)
-- Maintains original subtitle timing and format
-- Uses OpenSubtitles XML-RPC API for better quota access
-- Hash-based subtitle matching for accurate results
+- **Background Service**: Continuous monitoring and processing of video directories
+- **Automatic Processing**: Processes all video files in monitored directories
+- **Smart Subtitle Search**: Searches for target language subtitles first, falls back to English with translation
+- **Multi-Language Support**: Supports Hebrew, Spanish, French, German, Italian, Portuguese, Russian, Japanese, Korean, Chinese, and Arabic
+- **Language-Specific Validation**: Comprehensive quality assurance and validation for each supported language
+- **Multiple Video Formats**: Supports mp4, mkv, avi, mov, wmv, flv, webm
+- **Format Preservation**: Maintains original subtitle timing and format
+- **OpenSubtitles Integration**: Uses XML-RPC API for better quota access
+- **Hash-based Matching**: Accurate subtitle matching using file hashes
+- **Retry Logic**: Robust error handling with automatic retries
+- **Multi-directory Support**: Monitor multiple directories simultaneously
+
+## Project Structure
+
+```
+grab_subtitle/
+├── config/                     # Configuration files
+├── data/                      # Database storage
+├── docs/                      # Documentation
+├── logs/                      # Application logs
+├── scripts/                   # Utility scripts
+├── src/                       # Source code
+│   ├── api/                   # API integrations
+│   ├── background_service/    # Background service modules
+│   ├── config/               # Configuration management
+│   ├── services/             # Core services
+│   └── ...
+├── tests/                    # Test files
+└── tasks/                    # Project tasks
+```
+
+See `docs/project_structure.md` for detailed structure information.
 
 ## Setup
 
-1. Install the required dependencies:
+1. **Install Dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Create a `.env` file in the project root with your credentials:
-```
+2. **Create Environment File**:
+Create a `.env` file in the project root:
+```bash
 OPENSUBTITLES_USERNAME=your_opensubtitles_username
 OPENSUBTITLES_PASSWORD=your_opensubtitles_password
 OPENAI_API_KEY=your_openai_api_key
+DIRECTORY_PATH=/path/to/your/video/directory
 ```
 
-You'll need to:
-- Create an OpenSubtitles account at [OpenSubtitles](https://www.opensubtitles.com/en/consumers) and use your username/password
-- Get an OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+3. **Configure Service**:
+Edit `config/config.yaml` to customize service settings.
 
 ## Usage
 
-### Process a directory of video files:
+### Background Service (Recommended)
+
+Run the background service to continuously monitor and process video files:
+
+```bash
+python run_background_service.py
+```
+
+The service will:
+- Monitor the specified directory for new video files
+- Automatically download and translate subtitles
+- Handle errors and retries
+- Provide real-time status updates
+
+### Standalone Processing
+
+Process a single video file:
+```bash
+python scripts/translate_subtitles.py path/to/your/video.mp4
+```
+
+Process a directory:
 ```bash
 python -m src.main
 ```
 
-### Process a single video file:
-```bash
-python -c "
-from src.services.subtitle_service import SubtitleService
-service = SubtitleService()
-service.process_video_file('path/to/your/video.mp4')
-"
-```
+### Validation
 
-### Process with Hebrew subtitle validation:
-```bash
-python -m src.main --validate path/to/your/video.mp4
-```
-
-### Validate an existing Hebrew subtitle file:
+Validate an existing Hebrew subtitle file:
 ```bash
 python -m src.main --validate-only path/to/subtitle.heb.srt
 ```
 
-### Validate and attempt to fix issues:
+Validate and attempt to fix issues:
 ```bash
 python -m src.main --validate-only path/to/subtitle.heb.srt --fix
 ```
 
-### Test the OpenSubtitles API:
-```bash
-python test_xmlrpc.py
-```
+## Configuration
 
-### Test the validation functionality:
-```bash
-python test_validation_simple.py
-python example_validation_only.py
-```
+### Main Configuration (`config/config.yaml`)
 
-## Hebrew Subtitle Validation
+The service is configured through `config/config.yaml` with sections for:
 
-The service includes a comprehensive Hebrew subtitle validation layer that ensures quality and correctness of generated subtitles.
+- **API Settings**: OpenSubtitles credentials
+- **Translation**: OpenAI and translation parameters
+- **Service**: Background service configuration
+- **Processing**: File processing settings
+- **Validation**: Subtitle validation rules
+- **Logging**: Logging configuration
+
+### Environment Variables (`.env`)
+
+Required environment variables:
+- `OPENSUBTITLES_USERNAME`: OpenSubtitles account username
+- `OPENSUBTITLES_PASSWORD`: OpenSubtitles account password
+- `OPENAI_API_KEY`: OpenAI API key
+- `DIRECTORY_PATH`: Path to monitored video directory
+
+Optional environment variables:
+- `TARGET_LANGUAGE`: Target language for subtitles (defaults to "he" for Hebrew)
+
+## Multi-Language Subtitle Validation
+
+The service includes comprehensive subtitle validation for all supported languages:
 
 ### Validation Features
-
-- **Hebrew Text Detection**: Identifies Hebrew characters and validates Hebrew content ratio
-- **SRT Format Validation**: Ensures proper subtitle timing and format compliance
-- **Encoding Validation**: Checks for UTF-8 encoding and BOM issues
-- **Content Quality Checks**: Detects mixed languages and translation issues
+- **Language-Specific Text Detection**: Identifies target language characters and validates content ratio
+- **SRT Format Validation**: Ensures proper subtitle timing and format
+- **Encoding Validation**: Checks UTF-8 encoding and BOM issues
+- **Content Quality Checks**: Detects translation issues and quality problems
 - **Automatic Fixes**: Attempts to fix common formatting and timing issues
 
 ### Translation Improvements
+- **SRT Block-Aware Chunking**: Preserves complete subtitle blocks
+- **Translation Completeness**: Verifies all blocks are translated
+- **Enhanced Error Handling**: Better error reporting and recovery
+- **Quality Scoring**: Tracks subtitle quality metrics
+- **Multi-Language Support**: Supports translation to 11 different languages
 
-The translation service has been enhanced to ensure **complete translation of all subtitle blocks**:
+## Background Service Features
 
-- **SRT Block-Aware Chunking**: Preserves complete subtitle blocks during chunking
-- **Translation Completeness Validation**: Verifies all blocks are translated
-- **Improved Error Handling**: Better error reporting and recovery
-- **Enhanced System Prompts**: More consistent and accurate translations
-- **Block Count Verification**: Ensures no subtitle blocks are lost during translation
+### Directory Monitoring
+- **Recursive Scanning**: Monitors subdirectories
+- **Change Detection**: Detects new and modified files
+- **Configurable Intervals**: Adjustable scan frequency
 
-### Validation Methods
+### File Processing
+- **Worker Threads**: Parallel processing of multiple files
+- **Priority Queue**: Prioritizes new files over retries
+- **Status Tracking**: Comprehensive file status tracking
+- **Error Recovery**: Automatic retry with exponential backoff
 
-#### Standalone Validation
-```python
-from src.services.validation import SubtitleValidationService
+### Database Tracking
+- **File History**: Tracks all processed files
+- **Processing Statistics**: Detailed performance metrics
+- **Error Logging**: Comprehensive error tracking
+- **Status Persistence**: Maintains state across restarts
 
-validation_service = SubtitleValidationService()
-result = validation_service.validate_subtitle_file('subtitle.heb.srt')
+## API Integration
 
-if result['is_valid']:
-    print("✅ Hebrew subtitle is valid!")
-else:
-    print("❌ Validation errors found:")
-    for error in result['errors']:
-        print(f"  • {error}")
+### OpenSubtitles API
+- **XML-RPC Client**: Uses VIP API for better quota access
+- **Hash-based Search**: Accurate subtitle matching
+- **Retry Logic**: Handles API rate limiting and errors
+- **Authentication**: Secure credential management
+
+### OpenAI API
+- **Translation Service**: High-quality Hebrew translation
+- **Chunking Strategy**: Efficient processing of large files
+- **Quality Control**: Ensures translation completeness
+- **Error Handling**: Robust API error management
+
+## Development
+
+### Testing
+```bash
+# Run all tests
+python -m pytest tests/
+
+# Run specific test categories
+python -m pytest tests/unit/
+python -m pytest tests/integration/
 ```
 
-#### Validation with Subtitle Service
-```python
-from src.services.subtitle_service import SubtitleService
+### Code Structure
+- **Modular Design**: Clean separation of concerns
+- **Service Architecture**: Well-defined service boundaries
+- **Configuration Management**: Centralized configuration
+- **Error Handling**: Comprehensive error management
 
-service = SubtitleService()
+### Database Schema
+The service uses SQLite for file tracking with tables for:
+- `processed_files`: File processing history
+- `subtitle_operations`: Subtitle operation tracking
+- `scan_sessions`: Directory scan sessions
 
-# Process video with validation
-success = service.process_video_file_with_validation('video.mp4')
+See `docs/database_design.md` for detailed schema information.
 
-# Validate existing subtitle
-validation_result = service.validate_hebrew_subtitle('subtitle.heb.srt')
+## Troubleshooting
 
-# Validate and fix issues
-success = service.validate_and_fix_hebrew_subtitle('subtitle.heb.srt')
-```
+### Common Issues
 
-#### Translation Completeness Check
-```python
-from src.services.translation import TranslationService
+1. **API Rate Limiting**: The service includes retry logic for API limits
+2. **File Permissions**: Ensure the service has read/write access to directories
+3. **Network Issues**: Check internet connectivity for API calls
+4. **Database Errors**: Verify database file permissions and integrity
 
-translation_service = TranslationService()
+### Logs
+Check the `logs/` directory for detailed application logs with structured JSON format.
 
-# Check if all blocks were translated
-is_complete = translation_service.validate_translation_completeness(
-    'original.srt', 'translated.heb.srt'
-)
+### Status Monitoring
+The background service provides real-time status updates and health monitoring.
 
-if is_complete:
-    print("✅ All subtitle blocks translated successfully!")
-else:
-    print("❌ Some subtitle blocks were not translated!")
-```
+## Future Enhancements
 
-### Validation Criteria
+- **Enhanced Database Schema**: Multi-directory support with directory grouping
+- **GUI Interface**: Web-based dashboard for monitoring and configuration
+- **Machine Learning**: Automated subtitle quality improvement
+- **Cloud Integration**: Support for cloud storage providers
+- **Multi-language Support**: Support for additional languages beyond Hebrew
 
-The validation service checks for:
+## Contributing
 
-1. **Hebrew Content**: At least 50% of subtitles must contain Hebrew text
-2. **SRT Format**: Proper subtitle numbering, timing, and structure
-3. **Timing**: End times must be after start times
-4. **Encoding**: UTF-8 encoding without BOM
-5. **Content Quality**: Mixed language detection and translation quality
+1. Follow the existing code structure and patterns
+2. Add tests for new features
+3. Update documentation as needed
+4. Use the established configuration and logging patterns
 
-### Validation Output
+## License
 
-The validation service provides detailed reports including:
-
-- Overall validity status
-- Statistics (total subtitles, Hebrew ratio, file size)
-- Specific error messages
-- Warning messages for potential issues
-- Human-readable summary
-
-Example output:
-```
-Validation Summary for subtitle.heb.srt
-==================================================
-✅ File is VALID
-
-📊 Statistics:
-   Total subtitles: 150
-   Hebrew subtitles: 145
-   Hebrew ratio: 96.7%
-   File size: 12,450 characters
-```
-
-## How it works
-
-1. **File Analysis**: Extracts show name, season, and episode from video filename
-2. **Hash Search**: Uses OpenSubtitles hash-based search for exact file matching
-3. **Query Search**: Falls back to text-based search if hash search fails
-4. **Hebrew Priority**: Searches for Hebrew subtitles first
-5. **English Fallback**: Downloads English subtitles if Hebrew not available
-6. **Translation**: Uses OpenAI to translate English subtitles to Hebrew with **complete block preservation**
-7. **Translation Validation**: Verifies all subtitle blocks were translated successfully
-8. **Validation**: Validates Hebrew subtitle quality and format
-9. **Smart Selection**: Chooses the most popular subtitle by download count
-
-## File Naming Convention
-
-The service expects video files to be named with season/episode information:
-- `ShowName.S01E01.EpisodeTitle.mkv`
-- `ShowName.S01E01.mkv`
-- `ShowName.1x01.EpisodeTitle.mp4`
-
-## Notes
-
-- Subtitles are saved with the same name as the video file, with language suffix (e.g., `.heb.srt`)
-- The XML-RPC API provides better quota access than the REST API
-- Temporary English subtitle files are automatically cleaned up after translation
-- The service reuses existing subtitles before downloading new ones 
-- **Validation ensures Hebrew subtitle quality and can automatically fix common issues** 
+This project is licensed under the MIT License - see the LICENSE file for details. 

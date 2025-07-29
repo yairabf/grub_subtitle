@@ -111,11 +111,9 @@ class FileTracker:
         self._init_database()
     
     def _init_database(self) -> None:
-        """Initialize database tables and schema."""
+        """Initialize the database with all required tables."""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("PRAGMA foreign_keys = ON")
-                
                 # Create processed_files table
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS processed_files (
@@ -149,7 +147,7 @@ class FileTracker:
                         operation_duration REAL,
                         error_message TEXT,
                         created_at REAL DEFAULT (unixepoch()),
-                        FOREIGN KEY (file_id) REFERENCES processed_files(id) ON DELETE CASCADE
+                        FOREIGN KEY (file_id) REFERENCES processed_files (id)
                     )
                 """)
                 
@@ -159,7 +157,7 @@ class FileTracker:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         session_start_time REAL NOT NULL,
                         session_end_time REAL,
-                        directories_scanned TEXT NOT NULL,
+                        directories_scanned TEXT NOT NULL,  -- JSON array of directories
                         files_found INTEGER DEFAULT 0,
                         files_processed INTEGER DEFAULT 0,
                         files_skipped INTEGER DEFAULT 0,
@@ -178,12 +176,148 @@ class FileTracker:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_session_start ON scan_sessions(session_start_time)")
                 
                 conn.commit()
+                self.logger.info("Database initialized successfully")
                 
-            self.logger.info("Database initialized successfully")
-            
         except Exception as e:
-            self.logger.error(f"Failed to initialize database: {e}")
+            self.logger.error(f"Error initializing database: {e}")
             raise
+
+    def _init_enhanced_database(self) -> None:
+        """
+        Initialize enhanced database schema for multi-directory support.
+        This is a future enhancement that provides better organization.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Create directories table for tracking monitored directories
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS monitored_directories (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        directory_path TEXT UNIQUE NOT NULL,
+                        display_name TEXT,
+                        is_active BOOLEAN DEFAULT 1,
+                        scan_recursive BOOLEAN DEFAULT 1,
+                        scan_interval_minutes INTEGER DEFAULT 30,
+                        last_scan_time REAL,
+                        files_count INTEGER DEFAULT 0,
+                        created_at REAL DEFAULT (unixepoch()),
+                        updated_at REAL DEFAULT (unixepoch())
+                    )
+                """)
+                
+                # Create directory_groups table for organizing directories
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS directory_groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_name TEXT UNIQUE NOT NULL,
+                        description TEXT,
+                        is_active BOOLEAN DEFAULT 1,
+                        created_at REAL DEFAULT (unixepoch())
+                    )
+                """)
+                
+                # Create directory_group_members table for many-to-many relationship
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS directory_group_members (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id INTEGER NOT NULL,
+                        directory_id INTEGER NOT NULL,
+                        created_at REAL DEFAULT (unixepoch()),
+                        FOREIGN KEY (group_id) REFERENCES directory_groups (id),
+                        FOREIGN KEY (directory_id) REFERENCES monitored_directories (id),
+                        UNIQUE(group_id, directory_id)
+                    )
+                """)
+                
+                # Enhanced processed_files table with directory tracking
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS processed_files_enhanced (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_path TEXT UNIQUE NOT NULL,
+                        directory_id INTEGER NOT NULL,
+                        relative_path TEXT NOT NULL,  -- Path relative to monitored directory
+                        file_name TEXT NOT NULL,
+                        file_hash TEXT NOT NULL,
+                        file_size INTEGER NOT NULL,
+                        file_modified_time REAL NOT NULL,
+                        processing_status TEXT NOT NULL,
+                        processing_start_time REAL,
+                        processing_end_time REAL,
+                        processing_duration REAL,
+                        error_message TEXT,
+                        retry_count INTEGER DEFAULT 0,
+                        max_retries INTEGER DEFAULT 3,
+                        last_retry_time REAL,
+                        created_at REAL DEFAULT (unixepoch()),
+                        updated_at REAL DEFAULT (unixepoch()),
+                        FOREIGN KEY (directory_id) REFERENCES monitored_directories (id)
+                    )
+                """)
+                
+                # Enhanced subtitle_operations table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS subtitle_operations_enhanced (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_id INTEGER NOT NULL,
+                        operation_type TEXT NOT NULL,
+                        operation_status TEXT NOT NULL,
+                        subtitle_language TEXT,
+                        subtitle_path TEXT,
+                        subtitle_source TEXT,
+                        subtitle_quality_score REAL,  -- 0-100 quality score
+                        operation_start_time REAL,
+                        operation_end_time REAL,
+                        operation_duration REAL,
+                        error_message TEXT,
+                        retry_count INTEGER DEFAULT 0,
+                        created_at REAL DEFAULT (unixepoch()),
+                        FOREIGN KEY (file_id) REFERENCES processed_files_enhanced (id)
+                    )
+                """)
+                
+                # Enhanced scan_sessions table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_sessions_enhanced (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_start_time REAL NOT NULL,
+                        session_end_time REAL,
+                        directory_id INTEGER NOT NULL,
+                        scan_type TEXT NOT NULL,  -- 'full', 'incremental', 'manual'
+                        files_found INTEGER DEFAULT 0,
+                        files_new INTEGER DEFAULT 0,
+                        files_modified INTEGER DEFAULT 0,
+                        files_processed INTEGER DEFAULT 0,
+                        files_skipped INTEGER DEFAULT 0,
+                        files_failed INTEGER DEFAULT 0,
+                        scan_duration REAL,
+                        error_count INTEGER DEFAULT 0,
+                        created_at REAL DEFAULT (unixepoch()),
+                        FOREIGN KEY (directory_id) REFERENCES monitored_directories (id)
+                    )
+                """)
+                
+                # Create indexes for enhanced schema
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_enhanced_file_path ON processed_files_enhanced(file_path)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_enhanced_directory_id ON processed_files_enhanced(directory_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_enhanced_relative_path ON processed_files_enhanced(relative_path)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_enhanced_status ON processed_files_enhanced(processing_status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_enhanced_retry_count ON processed_files_enhanced(retry_count)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_directory_path ON monitored_directories(directory_path)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_directory_active ON monitored_directories(is_active)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_group_name ON directory_groups(group_name)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_session_directory ON scan_sessions_enhanced(directory_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_session_start_enhanced ON scan_sessions_enhanced(session_start_time)")
+                
+                conn.commit()
+                self.logger.info("Enhanced database schema initialized successfully")
+                
+        except Exception as e:
+            self.logger.error(f"Error initializing enhanced database: {e}")
+            raise
+    
+    def _get_connection(self):
+        """Get a database connection."""
+        return sqlite3.connect(self.db_path)
     
     def _calculate_file_hash(self, file_path: Path) -> str:
         """
@@ -734,23 +868,26 @@ class FileTracker:
             return 0
     
     def get_database_info(self) -> Dict[str, Any]:
-        """
-        Get database information and statistics.
-        
-        Returns:
-            Dictionary with database information
-        """
+        """Get database information and statistics."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Get table sizes
                 cursor = conn.execute("SELECT COUNT(*) FROM processed_files")
-                files_count = cursor.fetchone()[0]
+                total_files = cursor.fetchone()[0]
                 
                 cursor = conn.execute("SELECT COUNT(*) FROM subtitle_operations")
-                operations_count = cursor.fetchone()[0]
+                total_operations = cursor.fetchone()[0]
                 
                 cursor = conn.execute("SELECT COUNT(*) FROM scan_sessions")
-                sessions_count = cursor.fetchone()[0]
+                total_sessions = cursor.fetchone()[0]
+                
+                # Get status distribution
+                cursor = conn.execute("""
+                    SELECT processing_status, COUNT(*) 
+                    FROM processed_files 
+                    GROUP BY processing_status
+                """)
+                status_distribution = dict(cursor.fetchall())
                 
                 # Get database file size
                 db_size = Path(self.db_path).stat().st_size if Path(self.db_path).exists() else 0
@@ -758,11 +895,66 @@ class FileTracker:
                 return {
                     'database_path': self.db_path,
                     'database_size_bytes': db_size,
-                    'files_tracked': files_count,
-                    'operations_recorded': operations_count,
-                    'scan_sessions': sessions_count
+                    'database_size_mb': round(db_size / (1024 * 1024), 2),
+                    'total_files_tracked': total_files,
+                    'total_operations': total_operations,
+                    'total_scan_sessions': total_sessions,
+                    'status_distribution': status_distribution
                 }
                 
         except Exception as e:
             self.logger.error(f"Error getting database info: {e}")
-            return {} 
+            return {}
+    
+    def get_pending_files(self, max_files: int = 100) -> List[FileInfo]:
+        """
+        Get files that are pending processing (including failed files for retry).
+        
+        Args:
+            max_files: Maximum number of files to return
+            
+        Returns:
+            List of FileInfo objects for pending and failed files
+        """
+        try:
+            files_to_process = []
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT file_path, file_hash, file_size, file_modified_time,
+                           processing_start_time, processing_end_time, processing_duration,
+                           error_message, created_at, updated_at, processing_status
+                    FROM processed_files 
+                    WHERE processing_status IN (?, ?)
+                    ORDER BY 
+                        CASE 
+                            WHEN processing_status = ? THEN 0  -- PENDING first
+                            WHEN processing_status = ? THEN 1  -- FAILED second
+                        END,
+                        created_at ASC 
+                    LIMIT ?
+                """, (ProcessingStatus.PENDING.value, ProcessingStatus.FAILED.value, 
+                      ProcessingStatus.PENDING.value, ProcessingStatus.FAILED.value, max_files))
+                
+                for row in cursor.fetchall():
+                    file_info = FileInfo(
+                        file_path=row[0],
+                        file_hash=row[1],
+                        file_size=row[2],
+                        file_modified_time=row[3],
+                        processing_status=ProcessingStatus(row[10]),  # Use actual status from DB
+                        processing_start_time=row[4],
+                        processing_end_time=row[5],
+                        processing_duration=row[6],
+                        error_message=row[7],
+                        created_at=row[8],
+                        updated_at=row[9]
+                    )
+                    files_to_process.append(file_info)
+            
+            self.logger.debug(f"Retrieved {len(files_to_process)} pending/failed files")
+            return files_to_process
+            
+        except Exception as e:
+            self.logger.error(f"Error getting pending files: {e}")
+            return [] 

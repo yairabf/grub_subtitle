@@ -94,6 +94,10 @@ class ScanUpdateMessage(ServiceMessage):
     unchanged_files: int = 0
     scan_duration: float = 0.0
     scan_status: str = ""  # "running", "completed", "failed"
+    directories: List[str] = field(default_factory=list)
+    timestamp: Optional[datetime] = None
+    error_message: Optional[str] = None
+    errors: List[str] = field(default_factory=list)
 
 @dataclass
 class ErrorMessage(ServiceMessage):
@@ -393,41 +397,49 @@ class ServiceCommunicationManager:
         )
         return self.send_message(message)
     
-    def send_scan_started(self, scan_session_id: str, scan_type: str = "full") -> bool:
+    def send_scan_started(self, scan_id: str, directories: List[str] = None, timestamp: datetime = None, **kwargs) -> bool:
         """Send scan started notification."""
         return self.send_scan_update({
-            "scan_session_id": scan_session_id,
-            "scan_type": scan_type,
+            "scan_session_id": scan_id,
+            "scan_type": "full",
             "scan_status": "running",
             "total_files_found": 0,
             "new_files_found": 0,
             "modified_files_found": 0,
             "unchanged_files": 0,
-            "scan_duration": 0.0
+            "scan_duration": 0.0,
+            "directories": directories or [],
+            "timestamp": timestamp or datetime.now()
         })
     
-    def send_scan_progress(self, scan_session_id: str, progress_data: Dict[str, Any]) -> bool:
+    def send_scan_progress(self, scan_id: str, progress_data: Dict[str, Any], **kwargs) -> bool:
         """Send scan progress update."""
         return self.send_scan_update({
-            "scan_session_id": scan_session_id,
+            "scan_session_id": scan_id,
             "scan_status": "running",
             **progress_data
         })
     
-    def send_scan_completed(self, scan_session_id: str, final_data: Dict[str, Any]) -> bool:
+    def send_scan_completed(self, scan_id: str, total_files: int = 0, new_files: int = 0, modified_files: int = 0, unchanged_files: int = 0, scan_duration: float = 0.0, errors: List[str] = None, **kwargs) -> bool:
         """Send scan completed notification."""
         return self.send_scan_update({
-            "scan_session_id": scan_session_id,
+            "scan_session_id": scan_id,
             "scan_status": "completed",
-            **final_data
+            "total_files_found": total_files,
+            "new_files_found": new_files,
+            "modified_files_found": modified_files,
+            "unchanged_files": unchanged_files,
+            "scan_duration": scan_duration,
+            "errors": errors or []
         })
     
-    def send_scan_error(self, scan_session_id: str, error_message: str) -> bool:
+    def send_scan_error(self, scan_id: str, error_message: str, scan_duration: float = 0.0, **kwargs) -> bool:
         """Send scan error notification."""
         return self.send_scan_update({
-            "scan_session_id": scan_session_id,
+            "scan_session_id": scan_id,
             "scan_status": "failed",
-            "error_message": error_message
+            "error_message": error_message,
+            "scan_duration": scan_duration
         })
     
     def get_statistics(self) -> Dict[str, Any]:

@@ -554,31 +554,26 @@ class DirectoryScanner:
         
     def _is_file_new(self, video_file: VideoFileInfo) -> bool:
         """Check if a file is actually new based on multiple criteria."""
-        # A file is considered new if any of these conditions are met:
+        # A file is considered new if it meets these basic criteria:
         
-        # 1. It was created recently (within last 24 hours)
-        creation_age = datetime.now() - video_file.creation_time
-        is_recent = creation_age < timedelta(hours=24)
-        
-        # 2. It was modified recently (within last 12 hours)
-        modification_age = datetime.now() - video_file.modification_time
-        is_recently_modified = modification_age < timedelta(hours=12)
-        
-        # 3. It's a reasonable size for a video file (not a small fragment)
-        is_reasonable_size = video_file.size_bytes > self.config.min_file_size_mb * 1024 * 1024
-        
-        # 4. It's not a temporary or partial file
+        # 1. It's not a temporary or partial file
         filename = video_file.path.name.lower()
         is_not_temp = not any(pattern in filename for pattern in [
             '.tmp', '.temp', '.part', '.download', '.crdownload', '.partial'
         ])
         
-        # 5. It has a valid video extension
+        # 2. It has a valid video extension
         has_valid_extension = video_file.path.suffix.lower() in self.config.video_extensions
         
-        # File is new if it meets the basic criteria and is either recent or reasonable size
-        return (is_not_temp and has_valid_extension and 
-                (is_recent or is_recently_modified or is_reasonable_size))
+        # 3. It's a reasonable size for a video file (not a small fragment)
+        is_reasonable_size = video_file.size_bytes > self.config.min_file_size_mb * 1024 * 1024
+        
+        # 4. It's a valid video file (not corrupted or invalid)
+        is_valid_video = video_file.is_valid_video
+        
+        # File is new if it meets all the basic criteria
+        # We don't check age anymore since files in a new directory might be older
+        return (is_not_temp and has_valid_extension and is_reasonable_size and is_valid_video)
         
     def _has_file_changed(self, tracked_file: FileInfo, video_file: VideoFileInfo) -> bool:
         """Efficiently check if a file has changed using multiple criteria."""
@@ -618,6 +613,55 @@ class DirectoryScanner:
         }
         
     def is_scanning(self) -> bool:
-        """Check if scanning is currently in progress."""
-        with self._scan_lock:
-            return self._is_scanning 
+        """Check if scanner is currently scanning."""
+        return self._is_scanning
+    
+    def get_files_batch(self, max_files: int = 100) -> List[FileInfo]:
+        """
+        Get a batch of files that need processing.
+        
+        Args:
+            max_files: Maximum number of files to return
+            
+        Returns:
+            List of FileInfo objects for files that need processing
+        """
+        try:
+            # Use FileTracker to get pending files
+            files_to_process = self.file_tracker.get_pending_files(max_files)
+            self.logger.debug(f"Retrieved {len(files_to_process)} files for processing")
+            return files_to_process
+            
+        except Exception as e:
+            self.logger.error(f"Error getting files batch: {e}")
+            return []
+    
+    def get_new_files_for_processing(self, directories: List[str], max_files: int = 100) -> List[FileInfo]:
+        """
+        Get files that need processing from the database or scan if database is empty.
+        
+        Args:
+            directories: List of directories to scan
+            max_files: Maximum number of files to return
+            
+        Returns:
+            List of FileInfo objects for files that need processing
+        """
+        try:
+            # First try to get pending files from the database
+            pending_files = self.file_tracker.get_pending_files(max_files)
+            
+            # If no pending files in database, perform a scan to discover new files
+            if not pending_files:
+                self.logger.info("No pending files in database, performing initial scan...")
+                scan_result = self.scan_once(directories)
+                pending_files = scan_result.new_files[:max_files]
+                self.logger.info(f"Initial scan found {len(pending_files)} new files")
+            else:
+                self.logger.info(f"Found {len(pending_files)} files for processing from database")
+            
+            return pending_files
+            
+        except Exception as e:
+            self.logger.error(f"Error getting new files for processing: {e}")
+            return [] 

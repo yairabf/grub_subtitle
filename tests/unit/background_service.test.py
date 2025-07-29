@@ -341,17 +341,17 @@ class TestBackgroundServiceIntegration(unittest.TestCase):
         mock_files = [
             FileInfo(
                 file_path=self.test_video_files[0],
+                file_hash="hash1",
                 file_size=1024,
-                modification_time=time.time(),
-                is_new=True,
-                needs_processing=True
+                file_modified_time=time.time(),
+                processing_status=ProcessingStatus.PENDING
             ),
             FileInfo(
                 file_path=self.test_video_files[1],
+                file_hash="hash2",
                 file_size=2048,
-                modification_time=time.time(),
-                is_new=False,
-                needs_processing=True
+                file_modified_time=time.time(),
+                processing_status=ProcessingStatus.PENDING
             )
         ]
         mock_get_files.return_value = mock_files

@@ -1,12 +1,44 @@
 import os
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 import re
+import httpx
 
 class TranslationService:
-    def __init__(self):
+    def __init__(self, target_language="he", source_language="en"):
         load_dotenv()
-        openai.api_key = os.getenv('OPENAI_API_KEY')
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is required")
+        
+        self.target_language = target_language
+        self.source_language = source_language
+        
+        # Language names for translation prompts
+        self.language_names = {
+            "he": "Hebrew",
+            "es": "Spanish", 
+            "fr": "French",
+            "de": "German",
+            "it": "Italian",
+            "pt": "Portuguese",
+            "ru": "Russian",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "zh": "Chinese",
+            "ar": "Arabic"
+        }
+        
+        # Create a custom HTTP client without proxy settings
+        http_client = httpx.Client(
+            timeout=httpx.Timeout(30.0),
+            follow_redirects=True
+        )
+        
+        self.client = OpenAI(
+            api_key=api_key,
+            http_client=http_client
+        )
 
     def parse_srt_blocks(self, content):
         """Parse SRT content into subtitle blocks."""
@@ -29,7 +61,7 @@ class TranslationService:
         
         return blocks
 
-    def split_subtitle_content(self, content, max_chunk_size=1500, max_blocks_per_chunk=5):
+    def split_subtitle_content(self, content, max_chunk_size=4000, max_blocks_per_chunk=15):
         """Split subtitle content into chunks that preserve complete subtitle blocks."""
         blocks = self.parse_srt_blocks(content)
         chunks = []
@@ -110,11 +142,13 @@ class TranslationService:
         
         return chunks
 
-    def translate_subtitle(self, input_path, output_path, chunk_size=1500, max_blocks_per_chunk=5):
+    def translate_subtitle(self, input_path, output_path, chunk_size=4000, max_blocks_per_chunk=15):
         """Translate subtitle file using OpenAI."""
-        # Check if Hebrew subtitle already exists
+        target_language_name = self.language_names.get(self.target_language, self.target_language)
+        
+        # Check if target language subtitle already exists
         if os.path.exists(output_path):
-            print(f"Hebrew subtitle already exists: {os.path.basename(output_path)}")
+            print(f"{target_language_name} subtitle already exists: {os.path.basename(output_path)}")
             return True
             
         try:
@@ -151,27 +185,27 @@ class TranslationService:
                 
                 for attempt in range(max_retries):
                     try:
-                        response = openai.ChatCompletion.create(
+                        response = self.client.chat.completions.create(
                             model="gpt-3.5-turbo",
                             messages=[
-                                {"role": "system", "content": """You are a subtitle translator. Translate the following subtitle content to Hebrew, maintaining the exact same format and timing. 
+                                {"role": "system", "content": f"""You are a subtitle translator. Translate the following subtitle content to {target_language_name}, maintaining the exact same format and timing. 
 
 IMPORTANT RULES:
 1. Keep all numbers, timestamps, and formatting exactly as they are
 2. Only translate the text content (the actual subtitle text)
 3. Preserve the exact SRT format with subtitle numbers and timestamps
-4. Detect the source language automatically and translate to Hebrew
-5. Maintain proper Hebrew punctuation and grammar
+4. Detect the source language automatically and translate to {target_language_name}
+5. Maintain proper {target_language_name} punctuation and grammar
 6. Do not add or remove any subtitle blocks
 7. Keep the exact same number of subtitle blocks as the original
 8. Ensure each subtitle block is properly separated by empty lines"""},
                                 {"role": "user", "content": chunk}
                             ],
                             temperature=0.3,  # Lower temperature for more consistent translations
-                            max_tokens=2000   # Reduced for safety
+                            max_tokens=4000   # Increased for larger chunks
                         )
 
-                        translated_chunk = response["choices"][0]["message"]["content"]
+                        translated_chunk = response.choices[0].message.content
                         
                         if translated_chunk is None or not translated_chunk.strip():
                             print(f"Error: Translation returned empty content for chunk {i+1}")

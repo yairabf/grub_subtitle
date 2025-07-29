@@ -10,6 +10,8 @@ import threading
 import time
 import logging
 import queue
+import sys
+import os
 from enum import Enum
 from typing import Optional, Dict, Any, Callable, List
 from pathlib import Path
@@ -17,11 +19,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from contextlib import contextmanager
 
+# Add src directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from config.config_manager import ConfigManager
 from logging_system.subtitle_logger import SubtitleLogger
 from services.subtitle_service import SubtitleService
+from services.translation import TranslationService
 from services.file_tracker import FileTracker, ProcessingStatus
-from services.directory_scanner import DirectoryScanner
+from services.directory_scanner import DirectoryScanner, ScanConfig
+from services.service_communication import ServiceCommunicationManager
+from services.notification_service import NotificationService, NotificationType
 
 
 class ServiceState(Enum):
@@ -64,6 +72,16 @@ class ProcessingTask:
     status: str = "pending"  # pending, processing, completed, failed, retry
     error_message: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+    
+    def __lt__(self, other):
+        """Enable comparison for priority queue ordering."""
+        if not isinstance(other, ProcessingTask):
+            return NotImplemented
+        # Higher priority numbers should come first (lower values in queue)
+        if self.priority != other.priority:
+            return self.priority > other.priority
+        # If same priority, earlier creation time comes first
+        return self.created_at < other.created_at
 
 
 class ServiceStateError(Exception):
@@ -102,10 +120,47 @@ class BackgroundService:
         config = self.config_manager.config
         self.logger = SubtitleLogger(config)
         
+        # Get target language from configuration
+        translation_config = self.config_manager.get('translation', {})
+        target_language = translation_config.get('target_language', 'he')
+        
         # Initialize services
-        self.subtitle_service = SubtitleService()
-        self.file_tracker = FileTracker(config)
-        self.directory_scanner = DirectoryScanner(config, self.file_tracker)
+        self.subtitle_service = SubtitleService(
+            target_language=target_language,
+            config_manager=self.config_manager
+        )
+        
+        # Update translation service with target language
+        self.subtitle_service.translation_service = TranslationService(
+            target_language=target_language,
+            source_language=translation_config.get('source_language', 'en')
+        )
+        
+        # Initialize notification service
+        self.notification_service = NotificationService(config)
+        
+        # Get database path from service configuration
+        service_config = self.config_manager.get_service_config()
+        db_path = service_config.get('database', {}).get('file_path', './data/service_database.db')
+        self.file_tracker = FileTracker(db_path=db_path, config=config)
+        
+        # Create ScanConfig from service configuration
+        scanning_config = service_config.get('scanning', {})
+        scan_config = ScanConfig(
+            scan_interval_minutes=scanning_config.get('scan_timeout_seconds', 300) // 60,
+            max_scan_depth=10,
+            video_extensions={'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp'},
+            min_file_size_mb=10,
+            max_file_size_gb=50,
+            exclude_patterns=['*.tmp', '*.temp', '*.part', '*.download', '*.crdownload'],
+            include_hidden=False,
+            max_workers=scanning_config.get('scan_workers', 2)
+        )
+        
+        # Create communication manager for directory scanner
+        communication_manager = ServiceCommunicationManager(config, self.logger)
+        
+        self.directory_scanner = DirectoryScanner(scan_config, self.file_tracker, communication_manager, self.logger)
         
         # Service state management with enhanced thread safety
         self._state = ServiceState.STOPPED
@@ -138,6 +193,7 @@ class BackgroundService:
         
         # State history for debugging
         self._state_history: List[Dict[str, Any]] = []
+        self._max_history_size = 100
         
         # Load configuration
         self._load_configuration()
@@ -430,6 +486,14 @@ class BackgroundService:
                 # Transition to running state
                 self._transition_to_state(ServiceState.RUNNING, "Service started successfully")
                 
+                # Send notification
+                self.notification_service.notify(
+                    event_type="service_started",
+                    title="Background Service Started",
+                    message="Hebrew subtitle service is now running and monitoring directories",
+                    notification_type=NotificationType.SUCCESS
+                )
+                
                 self.logger.info("Background service started successfully")
                 return True
                 
@@ -470,6 +534,15 @@ class BackgroundService:
                         return False
                 
                 self._transition_to_state(ServiceState.STOPPED, "Service stopped successfully")
+                
+                # Send notification
+                self.notification_service.notify(
+                    event_type="service_stopped",
+                    title="Background Service Stopped",
+                    message="Hebrew subtitle service has been stopped",
+                    notification_type=NotificationType.INFO
+                )
+                
                 self.logger.info("Background service stopped successfully")
                 return True
                 
@@ -558,11 +631,12 @@ class BackgroundService:
             return history
     
     def _load_configuration(self) -> None:
-        """Load service configuration from config manager."""
+        """Load service configuration with sensible defaults."""
         try:
-            service_config = self.config_manager.get_service_config()
+            # Get service configuration with defaults
+            service_config = self.config_manager.get('service', {})
             
-            # Load processing configuration
+            # Load processing configuration with defaults
             processing_config = service_config.get('processing', {})
             self._queue_size = processing_config.get('queue_size', 100)
             self._worker_threads_count = processing_config.get('worker_threads', 3)
@@ -573,14 +647,74 @@ class BackgroundService:
             self._prioritize_new_files = processing_config.get('prioritize_new_files', True)
             self._skip_existing_subtitles = processing_config.get('skip_existing_subtitles', True)
             
-            # Load scanning configuration
+            # Load scanning configuration with defaults
             scanning_config = service_config.get('scanning', {})
-            self._scan_interval = scanning_config.get('scan_timeout_seconds', 300)
+            self._scan_interval_minutes = scanning_config.get('scan_interval_minutes', 30)
             self._max_files_per_scan = scanning_config.get('max_files_per_scan', 1000)
             self._parallel_scanning = scanning_config.get('parallel_scanning', True)
             
-            self.logger.info(f"Loaded processing configuration: {self._worker_threads_count} workers, "
-                           f"queue size {self._queue_size}, timeout {self._processing_timeout}s")
+            # Load directory configuration with defaults
+            directories_config = service_config.get('directories', [])
+            self._directories = []
+            
+            # If no directories configured, use sensible defaults
+            if not directories_config:
+                import os
+                # Try to use DIRECTORY_PATH from environment first
+                directory_path = os.getenv('DIRECTORY_PATH')
+                if directory_path and os.path.exists(directory_path):
+                    default_dirs = [
+                        {
+                            'path': directory_path,
+                            'recursive': True,
+                            'scan_interval_minutes': 30,
+                            'file_size_limit_mb': 10000,
+                            'exclude_patterns': ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"],
+                            'include_patterns': ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
+                        }
+                    ]
+                else:
+                    # Fallback to current directory and Downloads
+                    home_dir = os.path.expanduser("~")
+                    default_dirs = [
+                        {
+                            'path': os.getcwd(),
+                            'recursive': True,
+                            'scan_interval_minutes': 30,
+                            'file_size_limit_mb': 10000,
+                            'exclude_patterns': ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"],
+                            'include_patterns': ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
+                        },
+                        {
+                            'path': os.path.join(home_dir, "Downloads"),
+                            'recursive': False,
+                            'scan_interval_minutes': 15,
+                            'file_size_limit_mb': 5000,
+                            'exclude_patterns': ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"],
+                            'include_patterns': ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
+                        }
+                    ]
+                directories_config = default_dirs
+            
+            for dir_config in directories_config:
+                if dir_config.get('enabled', True):
+                    self._directories.append({
+                        'path': dir_config['path'],
+                        'recursive': dir_config.get('recursive', True),
+                        'scan_interval_minutes': dir_config.get('scan_interval_minutes', 30),
+                        'file_size_limit_mb': dir_config.get('file_size_limit_mb', 10000),
+                        'exclude_patterns': dir_config.get('exclude_patterns', []),
+                        'include_patterns': dir_config.get('include_patterns', [])
+                    })
+            
+            self.logger.info(f"Loaded configuration: {len(self._directories)} directories, "
+                           f"{self._worker_threads_count} workers, queue size {self._queue_size}")
+            
+            # Log the directory paths being monitored
+            for i, directory in enumerate(self._directories):
+                self.logger.info(f"Monitoring directory {i+1}: {directory['path']} "
+                               f"(recursive: {directory['recursive']}, "
+                               f"scan interval: {directory['scan_interval_minutes']} minutes)")
             
         except Exception as e:
             self.logger.error(f"Error loading configuration: {e}")
@@ -653,7 +787,7 @@ class BackgroundService:
             while not stop_event.is_set():
                 try:
                     # Get task from queue with timeout
-                    priority, task = self._processing_queue.get(timeout=1.0)
+                    task = self._processing_queue.get(timeout=1.0)
                     
                     # Process the task
                     self._process_task(task, worker_id)
@@ -675,7 +809,7 @@ class BackgroundService:
     
     def _process_task(self, task: ProcessingTask, worker_id: int) -> None:
         """Process a single file processing task."""
-        self.logger.info(f"Worker {worker_id} processing: {task.file_path}")
+        self.logger.info(f"Worker {worker_id} processing: {Path(task.file_path)}")
         
         # Update task status
         task.status = "processing"
@@ -685,20 +819,20 @@ class BackgroundService:
         try:
             # Check if file still exists
             if not Path(task.file_path).exists():
-                raise FileNotFoundError(f"File no longer exists: {task.file_path}")
+                raise FileNotFoundError(f"File no longer exists: {Path(task.file_path)}")
             
             # Check if we should skip existing subtitles
             if self._skip_existing_subtitles:
-                existing_subtitle = self._find_existing_subtitle(task.file_path)
+                existing_subtitle = self._find_existing_subtitle(Path(task.file_path))
                 if existing_subtitle:
-                    self.logger.info(f"Skipping {task.file_path} - subtitle already exists: {existing_subtitle}")
+                    self.logger.info(f"Skipping {Path(task.file_path)} - subtitle already exists: {existing_subtitle}")
                     task.status = "completed"
                     task.result = {"skipped": True, "reason": "subtitle_exists", "existing_subtitle": existing_subtitle}
                     self._processing_stats['tasks_completed'] += 1
                     return
             
             # Process the file using SubtitleService
-            result = self._process_video_file(task.file_path)
+            result = self._process_video_file(Path(task.file_path))
             
             # Update task with result
             task.status = "completed"
@@ -707,17 +841,33 @@ class BackgroundService:
             self._processing_stats['tasks_completed'] += 1
             
             # Update file tracker
-            self.file_tracker.update_file_status(
-                task.file_path, 
-                ProcessingStatus.COMPLETED if result.get('success') else ProcessingStatus.FAILED,
-                result
-            )
+            self.file_tracker.update_file_status(Path(task.file_path), ProcessingStatus.SUCCESS if result.get('success') else ProcessingStatus.FAILED, result.get('message', 'Unknown error'))
             
             # Update service status
             if result.get('success'):
                 self._update_status(files_processed=self._status.files_processed + 1)
+                
+                # Send success notification with enhanced details
+                subtitle_path = result.get('subtitle_path', 'N/A')
+                processing_time = str(task.processing_completed - task.processing_started) if task.processing_started and task.processing_completed else 'N/A'
+                subtitle_count = result.get('subtitle_count', 0)
+                
+                self.notification_service.notify_file_processed(
+                    file_path=task.file_path,
+                    subtitle_path=subtitle_path,
+                    processing_time=processing_time,
+                    subtitle_count=subtitle_count
+                )
             else:
                 self._update_status(files_failed=self._status.files_failed + 1)
+                
+                # Send failure notification with enhanced details
+                error_message = result.get('message', 'Unknown error')
+                self.notification_service.notify_file_failed(
+                    file_path=task.file_path,
+                    error=error_message,
+                    retry_count=task.retry_count
+                )
             
             self.logger.info(f"Worker {worker_id} completed: {task.file_path}")
             
@@ -743,10 +893,17 @@ class BackgroundService:
                 self._processing_stats['tasks_failed'] += 1
                 
                 # Update file tracker
-                self.file_tracker.update_file_status(task.file_path, ProcessingStatus.FAILED, {"error": str(e)})
+                self.file_tracker.update_file_status(Path(task.file_path), ProcessingStatus.FAILED, str(e))
                 
                 # Update service status
                 self._update_status(files_failed=self._status.files_failed + 1)
+                
+                # Send final failure notification with enhanced details
+                self.notification_service.notify_file_failed(
+                    file_path=task.file_path,
+                    error=str(e),
+                    retry_count=task.retry_count
+                )
         
         finally:
             self._processing_stats['tasks_processing'] -= 1
@@ -820,8 +977,8 @@ class BackgroundService:
                 max_retries=self._max_retry_attempts
             )
             
-            # Add to queue (priority queue uses negative priority for higher priority first)
-            self._processing_queue.put((-priority, task))
+            # Add to queue (priority queue uses task's __lt__ method for ordering)
+            self._processing_queue.put(task)
             self._processing_stats['tasks_queued'] += 1
             
             self.logger.debug(f"Queued file for processing: {file_path} (priority: {priority})")
@@ -831,31 +988,99 @@ class BackgroundService:
             self.logger.error(f"Failed to queue file {file_path}: {e}")
             return False
     
+    def _service_main_loop(self) -> None:
+        """Main service loop that coordinates scanning and processing."""
+        try:
+            self.logger.info("Service main loop started")
+            
+            while not self._stop_event.is_set():
+                try:
+                    # Check if service is paused
+                    if self._pause_event.is_set():
+                        time.sleep(1)
+                        continue
+                    
+                    # Perform directory scan
+                    self._scan_and_queue_files()
+                    
+                    # Update last scan time
+                    self._update_status(last_scan_time=datetime.now())
+                    
+                    # Wait for next scan interval
+                    scan_interval = self._scan_interval_minutes * 60  # Convert to seconds
+                    self.logger.debug(f"Waiting {scan_interval} seconds until next scan")
+                    
+                    # Sleep in smaller intervals to allow for graceful shutdown
+                    for _ in range(scan_interval):
+                        if self._stop_event.is_set():
+                            break
+                        time.sleep(1)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in service main loop: {e}")
+                    time.sleep(10)  # Wait before retrying
+            
+            self.logger.info("Service main loop stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Fatal error in service main loop: {e}")
+            self._transition_to_state(ServiceState.ERROR, f"Main loop error: {str(e)}")
+    
     def _scan_and_queue_files(self) -> None:
         """Scan directories for new files and queue them for processing."""
         try:
             self.logger.info("Starting directory scan for new files")
             
-            # Get files that need processing
-            files_to_process = self.directory_scanner.get_files_batch(
+            # Get files that need processing by scanning directories
+            directory_paths = [dir_config['path'] for dir_config in self._directories]
+            files_to_process = self.directory_scanner.get_new_files_for_processing(
+                directories=directory_paths,
                 max_files=self._max_files_per_scan
             )
             
             if not files_to_process:
                 self.logger.info("No new files found for processing")
+                
+                # Send notification for no files found
+                self.notification_service.notify(
+                    event_type="scan_completed",
+                    title="Directory Scan Completed",
+                    message="No new files found for processing",
+                    notification_type=NotificationType.INFO,
+                    metadata={"files_found": 0}
+                )
                 return
             
             self.logger.info(f"Found {len(files_to_process)} files to process")
             
             # Queue files for processing
             for file_info in files_to_process:
-                priority = 1 if self._prioritize_new_files and file_info.is_new else 0
+                # All files from database are pending/new, so give them normal priority
+                priority = 0
                 self._queue_file_for_processing(file_info.file_path, priority=priority)
             
             self.logger.info(f"Queued {len(files_to_process)} files for processing")
             
+            # Send scan completion notification
+            self.notification_service.notify(
+                event_type="scan_completed",
+                title="Directory Scan Completed",
+                message=f"Found and queued {len(files_to_process)} files for processing",
+                notification_type=NotificationType.INFO,
+                metadata={"files_found": len(files_to_process)}
+            )
+            
         except Exception as e:
             self.logger.error(f"Error during directory scan: {e}")
+            
+            # Send scan error notification
+            self.notification_service.notify(
+                event_type="error_occurred",
+                title="Directory Scan Error",
+                message=f"Error during directory scan: {str(e)}",
+                notification_type=NotificationType.ERROR,
+                metadata={"error": str(e)}
+            )
     
     def get_processing_statistics(self) -> Dict[str, Any]:
         """Get processing statistics."""
@@ -868,4 +1093,68 @@ class BackgroundService:
             'tasks_completed': self._processing_stats['tasks_completed'],
             'tasks_failed': self._processing_stats['tasks_failed'],
             'tasks_retried': self._processing_stats['tasks_retried']
-        } 
+        }
+    
+    def send_batch_completion_notification(self, batch_stats: Dict[str, Any]) -> None:
+        """Send batch completion notification with statistics."""
+        try:
+            total_files = batch_stats.get('total_files', 0)
+            successful = batch_stats.get('successful', 0)
+            failed = batch_stats.get('failed', 0)
+            skipped = batch_stats.get('skipped', 0)
+            processing_time = batch_stats.get('processing_time', 'N/A')
+            failed_files = batch_stats.get('failed_files', [])
+            
+            self.notification_service.notify_batch_completed(
+                total_files=total_files,
+                successful=successful,
+                failed=failed,
+                skipped=skipped,
+                processing_time=processing_time,
+                failed_files=failed_files
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to send batch completion notification: {e}")
+    
+    def send_daily_summary_notification(self) -> None:
+        """Send daily summary notification."""
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # Calculate daily statistics
+            daily_stats = self._calculate_daily_statistics()
+            
+            self.notification_service.notify_daily_summary(
+                date=today,
+                total_files=daily_stats['total_files'],
+                successful=daily_stats['successful'],
+                failed=daily_stats['failed'],
+                skipped=daily_stats['skipped'],
+                total_processing_time=daily_stats['processing_time']
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to send daily summary notification: {e}")
+    
+    def _calculate_daily_statistics(self) -> Dict[str, Any]:
+        """Calculate daily processing statistics."""
+        try:
+            # This would typically query the database for today's statistics
+            # For now, we'll use the current session statistics
+            return {
+                'total_files': self._status.files_processed + self._status.files_failed,
+                'successful': self._status.files_processed,
+                'failed': self._status.files_failed,
+                'skipped': 0,  # Would be calculated from database
+                'processing_time': f"{self._status.uptime_seconds} seconds"
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating daily statistics: {e}")
+            return {
+                'total_files': 0,
+                'successful': 0,
+                'failed': 0,
+                'skipped': 0,
+                'processing_time': 'N/A'
+            } 

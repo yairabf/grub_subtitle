@@ -1,190 +1,143 @@
-# Hebrew Subtitle Service Configuration
-# This file contains all configuration settings for the subtitle service
+# Multi-Language Subtitle Service Configuration
+# Simple configuration with sensible defaults
 
+# Required API Keys (must be set in .env file)
 api:
   opensubtitles:
     username: ${OPENSUBTITLES_USERNAME}
     password: ${OPENSUBTITLES_PASSWORD}
-    base_url: "https://api.opensubtitles.com/xml-rpc"
-    user_agent: "HebrewSubtitleService/1.0"
-    timeout: 30
-    max_retries: 3
   
   openai:
     api_key: ${OPENAI_API_KEY}
-    model: "gpt-3.5-turbo"
-    temperature: 0.3
-    max_tokens: 4000
-    timeout: 60
-    max_retries: 3
 
+# Translation Settings
+translation:
+  target_language: "he"  # Target language (e.g., "he" for Hebrew, "es" for Spanish, "fr" for French)
+  source_language: "en"  # Source language (default: English)
+  fallback_languages: ["en"]  # Languages to try if target language not found
+  language_priority: ["he", "en"]  # Priority order for subtitle search
+
+# Language-specific settings
+languages:
+  he:  # Hebrew
+    name: "Hebrew"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "hebrew"
+      direction: "rtl"
+  es:  # Spanish
+    name: "Spanish"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "latin"
+      direction: "ltr"
+  fr:  # French
+    name: "French"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "latin"
+      direction: "ltr"
+  de:  # German
+    name: "German"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "latin"
+      direction: "ltr"
+  it:  # Italian
+    name: "Italian"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "latin"
+      direction: "ltr"
+  pt:  # Portuguese
+    name: "Portuguese"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "latin"
+      direction: "ltr"
+  ru:  # Russian
+    name: "Russian"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "cyrillic"
+      direction: "ltr"
+  ja:  # Japanese
+    name: "Japanese"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "japanese"
+      direction: "ltr"
+  ko:  # Korean
+    name: "Korean"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "korean"
+      direction: "ltr"
+  zh:  # Chinese
+    name: "Chinese"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "chinese"
+      direction: "ltr"
+  ar:  # Arabic
+    name: "Arabic"
+    validation:
+      min_content_ratio: 0.5
+      character_set: "arabic"
+      direction: "rtl"
+
+# Service Configuration
+service:
+  directories:
+    - path: "${DIRECTORY_PATH}"
+      enabled: true
+      recursive: true
+      scan_interval_minutes: 30
+      file_size_limit_mb: 10000
+      exclude_patterns: ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"]
+      include_patterns: ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
+
+# Email notifications removed for simplicity
+# Add back later if needed
+
+# Processing settings (sensible defaults)
 processing:
   chunk_size: 3000
   max_blocks_per_chunk: 10
   supported_video_formats: [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"]
   max_concurrent_processes: 3
   temp_directory: "./temp"
-  
+
+# Validation settings (sensible defaults)
 validation:
-  min_hebrew_ratio: 0.5
-  max_timestamp_error: 0.1
   auto_fix: true
   strict_mode: false
+  max_timestamp_error: 0.1
 
-# Background Service Configuration
-service:
-  # Service lifecycle settings
-  auto_start: false
-  daemon_mode: false
-  restart_on_failure: true
-  max_restart_attempts: 3
-  restart_delay_seconds: 30
-  
-  # Directory monitoring settings
-  directories:
-    - path: "${HOME}/Videos"
-      enabled: true
-      recursive: true
-      scan_interval_minutes: 30
-      file_size_limit_mb: 10000  # 10GB
-      exclude_patterns: ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"]
-      include_patterns: ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
-    
-    - path: "${HOME}/Downloads"
-      enabled: true
-      recursive: false
-      scan_interval_minutes: 15
-      file_size_limit_mb: 5000   # 5GB
-      exclude_patterns: ["*.tmp", "*.temp", "*.part", ".DS_Store", "Thumbs.db"]
-      include_patterns: ["*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm"]
-  
-  # Scan behavior settings
-  scanning:
-    initial_scan_delay_seconds: 10
-    incremental_scan_enabled: true
-    full_scan_interval_hours: 24
-    scan_timeout_seconds: 300
-    max_files_per_scan: 1000
-    parallel_scanning: true
-    scan_workers: 2
-  
-  # File processing settings
-  processing:
-    queue_size: 100
-    worker_threads: 3
-    processing_timeout_seconds: 600
-    retry_failed_files: true
-    max_retry_attempts: 3
-    retry_delay_seconds: 60
-    prioritize_new_files: true
-    skip_existing_subtitles: true
-  
-  # Performance and resource management
-  performance:
-    cpu_limit_percent: 80
-    memory_limit_mb: 2048
-    disk_io_limit_mbps: 100
-    network_limit_mbps: 50
-    adaptive_processing: true
-    low_power_mode: false
-  
-  # Health monitoring settings
-  health:
-    monitoring_enabled: true
-    health_check_interval_seconds: 60
-    heartbeat_interval_seconds: 30
-    crash_detection_enabled: true
-    auto_recovery_enabled: true
-    health_score_threshold: 50.0
-    
-    # Resource thresholds
-    cpu_warning_percent: 70
-    cpu_critical_percent: 90
-    memory_warning_percent: 80
-    memory_critical_percent: 95
-    disk_warning_percent: 85
-    disk_critical_percent: 95
-  
-  # Communication and notifications
-  communication:
-    message_queue_size: 1000
-    command_timeout_seconds: 30
-    status_update_interval_seconds: 10
-    progress_update_interval_seconds: 5
-    
-  # Notification settings
-  notifications:
-    enabled: true
-    system_notifications: true
-    email_notifications: false
-    email:
-      smtp_server: "smtp.gmail.com"
-      smtp_port: 587
-      username: "${EMAIL_USERNAME}"
-      password: "${EMAIL_PASSWORD}"
-      from_address: "${EMAIL_FROM}"
-      to_addresses: ["${EMAIL_TO}"]
-    
-    # Notification events
-    events:
-      service_started: true
-      service_stopped: true
-      scan_started: false
-      scan_completed: true
-      file_processed: false
-      file_failed: true
-      health_warning: true
-      health_critical: true
-      error_occurred: true
-  
-  # Database and persistence
-  database:
-    file_path: "./data/service_database.db"
-    backup_enabled: true
-    backup_interval_hours: 24
-    backup_retention_days: 7
-    vacuum_interval_hours: 168  # 1 week
-    max_database_size_mb: 100
-  
-  # Logging and debugging
-  logging:
-    service_log_file: "logs/background_service.log"
-    debug_mode: false
-    verbose_logging: false
-    log_rotation:
-      max_size_mb: 10
-      backup_count: 5
-      compress: true
-    
-    # Log levels for different components
-    levels:
-      background_service: "INFO"
-      directory_scanner: "INFO"
-      file_tracker: "INFO"
-      health_monitor: "WARNING"
-      communication: "INFO"
-      processing: "INFO"
-  
+# Logging settings (sensible defaults)
 logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
   file: "logs/subtitle_service.log"
   max_size: "10MB"
   backup_count: 5
-  format: "json"  # json, text
+  format: "json"
   console_output: true
-  
+
+# Security settings (sensible defaults)
 security:
   encrypt_api_keys: true
   key_rotation_days: 90
   secure_storage_path: "./secure"
   audit_logging: true
-  
+
+# UI settings (sensible defaults)
 ui:
-  theme: "default"  # default, dark, light
-  language: "en"    # en, he
+  theme: "default"
+  language: "en"
   auto_save_config: true
   show_advanced_options: false
-  
+
+# Path settings (sensible defaults)
 paths:
   default_output_dir: "./subtitles"
   log_directory: "./logs"
