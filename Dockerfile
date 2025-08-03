@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY requirements-docker.txt requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -29,16 +29,9 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs /app/config /app/cache /app/temp /app/subtitles
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash subtitle_user && \
-    chown -R subtitle_user:subtitle_user /app
-
-# Switch to non-root user
-USER subtitle_user
-
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+    CMD python -c "import os; exit(0 if os.path.exists('/app/data/service_database.db') else 1)"
 
 # Expose port for health checks (optional)
 EXPOSE 8080

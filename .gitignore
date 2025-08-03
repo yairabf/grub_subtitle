@@ -43,7 +43,7 @@ logs/
 .env
 .env.local
 .env.*.local
-
+*.env*
 # Security files
 secure/
 *.key

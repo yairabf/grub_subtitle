@@ -4,9 +4,35 @@ from pathlib import Path
 from dotenv import load_dotenv
 from api.opensubtitles import OpenSubtitlesAPI
 from services.translation import TranslationService
-from services.validation import SubtitleValidationService
+from services.validation_service import ValidationService
 from utils.file_utils import calculate_opensubtitles_hash, get_episode_info
 from typing import Dict, Optional, Any
+from enum import Enum
+
+class LanguageCodeMapping(Enum):
+    """Language code mappings for subtitle file extensions."""
+    ENGLISH = ["en", "eng", "english"]
+    HEBREW = ["he", "heb", "hebrew"]
+    SPANISH = ["es", "spa", "spanish"]
+    FRENCH = ["fr", "fre", "french"]
+    GERMAN = ["de", "ger", "german"]
+    ITALIAN = ["it", "ita", "italian"]
+    PORTUGUESE = ["pt", "por", "portuguese"]
+    RUSSIAN = ["ru", "rus", "russian"]
+    JAPANESE = ["ja", "jpn", "japanese"]
+    KOREAN = ["ko", "kor", "korean"]
+    CHINESE = ["zh", "chi", "chinese"]
+    ARABIC = ["ar", "ara", "arabic"]
+    
+    @classmethod
+    def get_codes_for_language(cls, language: str) -> list:
+        """Get all possible codes for a given language."""
+        language = language.lower()
+        for mapping in cls:
+            if language in mapping.value:
+                return mapping.value
+        # If not found, return the original language code
+        return [language]
 
 class SubtitleService:
     def __init__(self, opensubtitles_username=None, opensubtitles_password=None, openai_api_key=None, target_language="he", config_manager=None):
@@ -16,8 +42,8 @@ class SubtitleService:
         self.target_language = target_language
         self.config_manager = config_manager
         
-        # Initialize validation service with target language
-        self.validation_service = SubtitleValidationService(target_language=target_language, config_manager=config_manager)
+        # Initialize validation service
+        self.validation_service = ValidationService(config_manager=config_manager)
         
         # Get language configuration
         self.language_config = self._get_language_config()
@@ -346,8 +372,44 @@ class SubtitleService:
             else:
                 print(f"❌ Found subtitle but it's not {self.language_config['name']} (language: {subtitle_lang}), will try English")
         
-        # 3. If there is no Hebrew sub to download, download English
-        print(f"🔍 No {self.language_config['name']} subtitle available, searching for English subtitle...")
+        # 3. If there is no Hebrew sub to download, check for existing source language subtitle
+        print(f"🔍 No {self.language_config['name']} subtitle available, checking for existing source language subtitle...")
+        
+        # Get source language from config or default to English
+        source_language = "en"  # Default
+        if self.config_manager:
+            try:
+                source_language = self.config_manager.get('translation.source_language', 'en')
+            except:
+                pass
+        
+        # Check if source language subtitle already exists
+        source_subtitle_path = self._find_existing_subtitle(video_path, source_language, output_dir)
+        if source_subtitle_path:
+            print(f"✅ {source_language.upper()} subtitle already exists: {source_subtitle_path}")
+            print(f"🔄 Translating existing {source_language.upper()} subtitle to {self.language_config['name']}...")
+            if self._translate_existing_subtitle(source_subtitle_path, output_dir):
+                print(f"✅ Successfully translated existing {source_language.upper()} subtitle to {self.language_config['name']}")
+                return True
+            else:
+                print(f"❌ Failed to translate existing {source_language.upper()} subtitle to {self.language_config['name']}")
+                return False
+        
+        # Also check for English subtitle as fallback (in case source language is different)
+        if source_language != "en":
+            english_subtitle_path = self._find_existing_subtitle(video_path, 'eng', output_dir)
+            if english_subtitle_path:
+                print(f"✅ English subtitle already exists: {english_subtitle_path}")
+                print(f"🔄 Translating existing English subtitle to {self.language_config['name']}...")
+                if self._translate_existing_subtitle(english_subtitle_path, output_dir):
+                    print(f"✅ Successfully translated existing English subtitle to {self.language_config['name']}")
+                    return True
+                else:
+                    print(f"❌ Failed to translate existing English subtitle to {self.language_config['name']}")
+                    return False
+        
+        # If no existing source subtitle, search and download
+        print(f"🔍 No existing source subtitle found, searching for {source_language.upper()} subtitle to download...")
         english_subtitle = self._find_subtitle_aggressive_english(
             video_path, show_name, season, episode
         )
@@ -378,23 +440,36 @@ class SubtitleService:
         return False
     
     def _find_existing_subtitle(self, video_path, language, output_dir):
-        """Find existing subtitle file for the video."""
+        """Find existing subtitle file for the video using multiple language code variations."""
         video_stem = video_path.stem
         possible_extensions = ['.srt', '.sub', '.ssa', '.ass']
         
-        for ext in possible_extensions:
-            subtitle_path = output_dir / f"{video_stem}.{language}{ext}"
-            if subtitle_path.exists():
-                return subtitle_path
+        # Get all possible language codes for this language
+        language_codes = LanguageCodeMapping.get_codes_for_language(language)
         
+        print(f"🔍 Checking for existing {language.upper()} subtitle with codes: {language_codes}")
+        
+        # Check each language code variation
+        for lang_code in language_codes:
+            for ext in possible_extensions:
+                subtitle_path = output_dir / f"{video_stem}.{lang_code}{ext}"
+                if subtitle_path.exists():
+                    print(f"✅ Found existing subtitle: {subtitle_path}")
+                    return subtitle_path
+        
+        print(f"❌ No existing {language.upper()} subtitle found with any code variation")
         return None
     
     def _find_subtitle_aggressive_english(self, video_path, show_name, season, episode):
-        """Find English subtitle on OpenSubtitles trying both 'eng' and 'en' language codes."""
+        """Find English subtitle on OpenSubtitles trying multiple English language codes."""
         print(f"🔍 Aggressively searching for English subtitles for: {show_name}")
         
-        # Try both English language codes
-        for lang_code in ['eng', 'en']:
+        # Get all possible English language codes
+        english_codes = LanguageCodeMapping.get_codes_for_language("en")
+        print(f"  Trying English codes: {english_codes}")
+        
+        # Try each English language code
+        for lang_code in english_codes:
             print(f"  Trying English code: {lang_code}")
             
             # Try hash-based search first (most accurate)
@@ -593,9 +668,9 @@ class SubtitleService:
         print(f"\n=== Processing complete ===")
         print(f"Successfully processed: {success_count}/{len(video_files)} files") 
 
-    def validate_hebrew_subtitle(self, subtitle_path: str) -> Dict[str, Any]:
-        """Validate a Hebrew subtitle file."""
-        print(f"\n🔍 Validating Hebrew subtitle: {os.path.basename(subtitle_path)}")
+    def validate_subtitle(self, subtitle_path: str) -> Dict[str, Any]:
+        """Validate subtitle file focusing on numbering sequence."""
+        print(f"\n🔍 Validating subtitle: {os.path.basename(subtitle_path)}")
         
         validation_result = self.validation_service.validate_subtitle_file(subtitle_path)
         
@@ -605,39 +680,25 @@ class SubtitleService:
         
         return validation_result
 
-    def validate_and_fix_hebrew_subtitle(self, subtitle_path: str) -> bool:
-        """Validate a Hebrew subtitle file and attempt to fix common issues."""
-        validation_result = self.validate_hebrew_subtitle(subtitle_path)
+    def validate_and_fix_subtitle(self, subtitle_path: str) -> bool:
+        """Validate subtitle file and attempt to fix numbering issues."""
+        validation_result = self.validate_subtitle(subtitle_path)
         
         if validation_result['is_valid']:
-            print(f"✅ {self.language_config['name']} subtitle is valid!")
+            print(f"✅ Subtitle is valid!")
             return True
         
-        # Try to fix common issues
-        print(f"\n🔧 Attempting to fix validation issues for {self.language_config['name']} subtitle...")
+        # Try to fix numbering issues
+        print(f"\n🔧 Attempting to fix subtitle numbering...")
         
-        try:
-            with open(subtitle_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+        if self.validation_service.fix_subtitle_numbering(subtitle_path):
+            print(f"✅ Applied fixes to subtitle file")
             
-            fixed_content = self._fix_common_issues(content)
-            
-            if fixed_content != content:
-                # Write fixed content back to file
-                with open(subtitle_path, 'w', encoding='utf-8') as f:
-                    f.write(fixed_content)
-                
-                print(f"✅ Applied fixes to {self.language_config['name']} subtitle file")
-                
-                # Re-validate after fixes
-                new_validation = self.validate_hebrew_subtitle(subtitle_path)
-                return new_validation['is_valid']
-            else:
-                print(f"⚠️  No automatic fixes could be applied for {self.language_config['name']} subtitle")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Error attempting to fix {self.language_config['name']} subtitle: {e}")
+            # Re-validate after fixes
+            new_validation = self.validate_subtitle(subtitle_path)
+            return new_validation['is_valid']
+        else:
+            print(f"❌ Failed to apply fixes to subtitle file")
             return False
 
     def _fix_common_issues(self, content: str) -> str:
@@ -754,7 +815,7 @@ class SubtitleService:
         
         if os.path.exists(hebrew_subtitle_path):
             print(f"\n🔍 Validating generated {self.language_config['name']} subtitle...")
-            return self.validate_and_fix_hebrew_subtitle(hebrew_subtitle_path)
+            return self.validate_and_fix_subtitle(hebrew_subtitle_path)
         else:
             print(f"❌ No {self.language_config['name']} subtitle was generated for validation")
             return False
@@ -778,7 +839,7 @@ class SubtitleService:
             
             if hebrew_subtitle_path:
                 print(f"\n🔍 Validating generated {self.language_config['name']} subtitle...")
-                return self.validate_and_fix_hebrew_subtitle(str(hebrew_subtitle_path))
+                return self.validate_and_fix_subtitle(str(hebrew_subtitle_path))
             else:
                 print(f"❌ No {self.language_config['name']} subtitle was generated for validation")
                 return False

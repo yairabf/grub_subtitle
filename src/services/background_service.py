@@ -29,7 +29,7 @@ from services.translation import TranslationService
 from services.file_tracker import FileTracker, ProcessingStatus
 from services.directory_scanner import DirectoryScanner, ScanConfig
 from services.service_communication import ServiceCommunicationManager
-from services.notification_service import NotificationService, NotificationType
+
 
 
 class ServiceState(Enum):
@@ -136,8 +136,7 @@ class BackgroundService:
             source_language=translation_config.get('source_language', 'en')
         )
         
-        # Initialize notification service
-        self.notification_service = NotificationService(config)
+
         
         # Get database path from service configuration
         service_config = self.config_manager.get_service_config()
@@ -486,14 +485,6 @@ class BackgroundService:
                 # Transition to running state
                 self._transition_to_state(ServiceState.RUNNING, "Service started successfully")
                 
-                # Send notification
-                self.notification_service.notify(
-                    event_type="service_started",
-                    title="Background Service Started",
-                    message="Hebrew subtitle service is now running and monitoring directories",
-                    notification_type=NotificationType.SUCCESS
-                )
-                
                 self.logger.info("Background service started successfully")
                 return True
                 
@@ -534,14 +525,6 @@ class BackgroundService:
                         return False
                 
                 self._transition_to_state(ServiceState.STOPPED, "Service stopped successfully")
-                
-                # Send notification
-                self.notification_service.notify(
-                    event_type="service_stopped",
-                    title="Background Service Stopped",
-                    message="Hebrew subtitle service has been stopped",
-                    notification_type=NotificationType.INFO
-                )
                 
                 self.logger.info("Background service stopped successfully")
                 return True
@@ -846,28 +829,8 @@ class BackgroundService:
             # Update service status
             if result.get('success'):
                 self._update_status(files_processed=self._status.files_processed + 1)
-                
-                # Send success notification with enhanced details
-                subtitle_path = result.get('subtitle_path', 'N/A')
-                processing_time = str(task.processing_completed - task.processing_started) if task.processing_started and task.processing_completed else 'N/A'
-                subtitle_count = result.get('subtitle_count', 0)
-                
-                self.notification_service.notify_file_processed(
-                    file_path=task.file_path,
-                    subtitle_path=subtitle_path,
-                    processing_time=processing_time,
-                    subtitle_count=subtitle_count
-                )
             else:
                 self._update_status(files_failed=self._status.files_failed + 1)
-                
-                # Send failure notification with enhanced details
-                error_message = result.get('message', 'Unknown error')
-                self.notification_service.notify_file_failed(
-                    file_path=task.file_path,
-                    error=error_message,
-                    retry_count=task.retry_count
-                )
             
             self.logger.info(f"Worker {worker_id} completed: {task.file_path}")
             
@@ -897,13 +860,6 @@ class BackgroundService:
                 
                 # Update service status
                 self._update_status(files_failed=self._status.files_failed + 1)
-                
-                # Send final failure notification with enhanced details
-                self.notification_service.notify_file_failed(
-                    file_path=task.file_path,
-                    error=str(e),
-                    retry_count=task.retry_count
-                )
         
         finally:
             self._processing_stats['tasks_processing'] -= 1
@@ -1040,47 +996,16 @@ class BackgroundService:
             
             if not files_to_process:
                 self.logger.info("No new files found for processing")
-                
-                # Send notification for no files found
-                self.notification_service.notify(
-                    event_type="scan_completed",
-                    title="Directory Scan Completed",
-                    message="No new files found for processing",
-                    notification_type=NotificationType.INFO,
-                    metadata={"files_found": 0}
-                )
                 return
-            
-            self.logger.info(f"Found {len(files_to_process)} files to process")
             
             # Queue files for processing
             for file_info in files_to_process:
-                # All files from database are pending/new, so give them normal priority
-                priority = 0
-                self._queue_file_for_processing(file_info.file_path, priority=priority)
+                self._queue_file_for_processing(file_info.file_path)
             
             self.logger.info(f"Queued {len(files_to_process)} files for processing")
             
-            # Send scan completion notification
-            self.notification_service.notify(
-                event_type="scan_completed",
-                title="Directory Scan Completed",
-                message=f"Found and queued {len(files_to_process)} files for processing",
-                notification_type=NotificationType.INFO,
-                metadata={"files_found": len(files_to_process)}
-            )
-            
         except Exception as e:
             self.logger.error(f"Error during directory scan: {e}")
-            
-            # Send scan error notification
-            self.notification_service.notify(
-                event_type="error_occurred",
-                title="Directory Scan Error",
-                message=f"Error during directory scan: {str(e)}",
-                notification_type=NotificationType.ERROR,
-                metadata={"error": str(e)}
-            )
     
     def get_processing_statistics(self) -> Dict[str, Any]:
         """Get processing statistics."""
@@ -1093,68 +1018,4 @@ class BackgroundService:
             'tasks_completed': self._processing_stats['tasks_completed'],
             'tasks_failed': self._processing_stats['tasks_failed'],
             'tasks_retried': self._processing_stats['tasks_retried']
-        }
-    
-    def send_batch_completion_notification(self, batch_stats: Dict[str, Any]) -> None:
-        """Send batch completion notification with statistics."""
-        try:
-            total_files = batch_stats.get('total_files', 0)
-            successful = batch_stats.get('successful', 0)
-            failed = batch_stats.get('failed', 0)
-            skipped = batch_stats.get('skipped', 0)
-            processing_time = batch_stats.get('processing_time', 'N/A')
-            failed_files = batch_stats.get('failed_files', [])
-            
-            self.notification_service.notify_batch_completed(
-                total_files=total_files,
-                successful=successful,
-                failed=failed,
-                skipped=skipped,
-                processing_time=processing_time,
-                failed_files=failed_files
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Failed to send batch completion notification: {e}")
-    
-    def send_daily_summary_notification(self) -> None:
-        """Send daily summary notification."""
-        try:
-            today = datetime.now().strftime('%Y-%m-%d')
-            
-            # Calculate daily statistics
-            daily_stats = self._calculate_daily_statistics()
-            
-            self.notification_service.notify_daily_summary(
-                date=today,
-                total_files=daily_stats['total_files'],
-                successful=daily_stats['successful'],
-                failed=daily_stats['failed'],
-                skipped=daily_stats['skipped'],
-                total_processing_time=daily_stats['processing_time']
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Failed to send daily summary notification: {e}")
-    
-    def _calculate_daily_statistics(self) -> Dict[str, Any]:
-        """Calculate daily processing statistics."""
-        try:
-            # This would typically query the database for today's statistics
-            # For now, we'll use the current session statistics
-            return {
-                'total_files': self._status.files_processed + self._status.files_failed,
-                'successful': self._status.files_processed,
-                'failed': self._status.files_failed,
-                'skipped': 0,  # Would be calculated from database
-                'processing_time': f"{self._status.uptime_seconds} seconds"
-            }
-        except Exception as e:
-            self.logger.error(f"Error calculating daily statistics: {e}")
-            return {
-                'total_files': 0,
-                'successful': 0,
-                'failed': 0,
-                'skipped': 0,
-                'processing_time': 'N/A'
-            } 
+        } 

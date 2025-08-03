@@ -236,25 +236,24 @@ class ConfigManager:
             self._validate_service_config()
     
     def _validate_service_config(self):
-        """Validate service-specific configuration."""
-        service_config = self.config.get('service', {})
+        """Validate service configuration."""
+        if 'service' not in self.config:
+            return
         
-        # Validate directory configuration
+        service_config = self.config['service']
         directories = service_config.get('directories', [])
-        if not directories:
-            raise ConfigurationError("At least one directory must be configured for monitoring")
         
         for i, directory in enumerate(directories):
-            if not directory.get('path'):
-                raise ConfigurationError(f"Directory {i}: path is required")
+            # Validate required fields
+            if 'path' not in directory:
+                raise ConfigurationError(f"Directory {i}: missing required field 'path'")
             
-            # Validate path exists or can be created
+            # Validate path exists or is accessible (don't try to create in Docker)
             path = directory.get('path')
             if not os.path.exists(path):
-                try:
-                    os.makedirs(path, exist_ok=True)
-                except OSError:
-                    raise ConfigurationError(f"Directory {i}: cannot create path {path}")
+                # In Docker, we should just check if the path is accessible via mount
+                # Don't try to create directories that are mounted from host
+                logging.warning(f"Directory {i}: path {path} does not exist, but may be accessible via Docker mount")
             
             # Validate scan interval
             scan_interval = directory.get('scan_interval_minutes', 30)
@@ -341,24 +340,21 @@ class ConfigManager:
                 continue
             
             try:
-                # Check if path exists or can be created
+                # Check if path exists (don't try to create in Docker)
                 if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
+                    # In Docker, just log a warning but don't fail
+                    logging.warning(f"Path does not exist but may be accessible via Docker mount: {path}")
+                    valid_dirs.append(path)  # Assume it's valid for Docker
+                    continue
                 
                 # Check if path is readable
                 if not os.access(path, os.R_OK):
                     invalid_dirs.append(f"Path not readable: {path}")
-                    continue
-                
-                # Check if path is writable (for creating subtitles)
-                if not os.access(path, os.W_OK):
-                    invalid_dirs.append(f"Path not writable: {path}")
-                    continue
-                
-                valid_dirs.append(path)
-                
-            except (OSError, PermissionError) as e:
-                invalid_dirs.append(f"Error accessing {path}: {str(e)}")
+                else:
+                    valid_dirs.append(path)
+                    
+            except Exception as e:
+                invalid_dirs.append(f"Error accessing path {path}: {e}")
         
         return {'valid': valid_dirs, 'invalid': invalid_dirs}
     

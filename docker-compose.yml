@@ -5,6 +5,7 @@ services:
     build: .
     container_name: grab-subtitle
     restart: unless-stopped
+    user: root  # Run as root to access mounted volumes
     environment:
       # OpenSubtitles API credentials
       - OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME}
@@ -16,18 +17,15 @@ services:
       # Target language (default: Hebrew)
       - TARGET_LANGUAGE=${TARGET_LANGUAGE:-he}
       
-      # Directory to monitor (default: /media/videos)
-      - DIRECTORY_PATH=${DIRECTORY_PATH:-/media/videos}
+      # Directory to monitor (same as subtitle output)
+      - DIRECTORY_PATH=/media/videos
       
       # Logging
       - PYTHONUNBUFFERED=1
       
     volumes:
-      # Mount video directory to monitor
-      - ${VIDEO_DIRECTORY:-./videos}:/media/videos:ro
-      
-      # Mount subtitle output directory
-      - ${SUBTITLE_OUTPUT:-./subtitles}:/app/subtitles
+      # Mount video directory to monitor and save subtitles (read-write)
+      - /media/videos:/media/videos
       
       # Mount configuration directory
       - ${CONFIG_DIR:-./config}:/app/config:ro

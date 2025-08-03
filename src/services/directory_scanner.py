@@ -8,6 +8,7 @@ for the background subtitle service.
 import os
 import time
 import logging
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Set, Optional, Callable
 from dataclasses import dataclass, field
@@ -97,6 +98,7 @@ class DirectoryScanner:
         self._total_scans = 0
         self._total_files_processed = 0
         self._total_new_files_found = 0
+        self._is_first_scan = True  # Track if this is the first scan
         
     def start_scanning(self, directories: List[str]) -> bool:
         """
@@ -330,12 +332,15 @@ class DirectoryScanner:
                     
                     # Send progress update
                     progress_percent = (completed_dirs / total_directories) * 100
+                    progress_data = {
+                        "directories_completed": completed_dirs,
+                        "total_directories": total_directories,
+                        "files_found": len(video_files),
+                        "progress_percent": progress_percent
+                    }
                     self.communication_manager.send_scan_progress(
                         scan_id=scan_id,
-                        directories_completed=completed_dirs,
-                        total_directories=total_directories,
-                        files_found=len(video_files),
-                        progress_percent=progress_percent
+                        progress_data=progress_data
                     )
                     
                 except Exception as e:
@@ -422,8 +427,8 @@ class DirectoryScanner:
                 self.logger.warning(f"Invalid video file format: {file_path}")
                 return None
                 
-            # Calculate file hash
-            file_hash = self.file_tracker.calculate_file_hash(str(file_path))
+            # Calculate file hash (use fast hash for large files)
+            file_hash = self._calculate_fast_hash(file_path)
             
             return VideoFileInfo(
                 path=file_path,
@@ -499,6 +504,20 @@ class DirectoryScanner:
         except Exception as e:
             self.logger.warning(f"Error validating video file {file_path}: {e}")
             return False
+    
+    def _calculate_fast_hash(self, file_path: Path) -> str:
+        """
+        Calculate a fast hash for large video files using file size and modification time.
+        This is much faster than reading the entire file for SHA-256.
+        """
+        try:
+            stat = file_path.stat()
+            # Use file size + modification time as a fast hash
+            fast_hash_data = f"{stat.st_size}_{stat.st_mtime}_{stat.st_ctime}"
+            return hashlib.md5(fast_hash_data.encode()).hexdigest()
+        except Exception as e:
+            self.logger.warning(f"Error calculating fast hash for {file_path}: {e}")
+            return ""
         
     def _compare_with_tracked_files(self, video_files: List[VideoFileInfo]) -> tuple[List[FileInfo], List[FileInfo], List[FileInfo]]:
         """Compare found video files with tracked files using efficient change detection."""
@@ -638,7 +657,7 @@ class DirectoryScanner:
     
     def get_new_files_for_processing(self, directories: List[str], max_files: int = 100) -> List[FileInfo]:
         """
-        Get files that need processing from the database or scan if database is empty.
+        Get files that need processing by always performing a full directory scan.
         
         Args:
             directories: List of directories to scan
@@ -648,17 +667,40 @@ class DirectoryScanner:
             List of FileInfo objects for files that need processing
         """
         try:
-            # First try to get pending files from the database
-            pending_files = self.file_tracker.get_pending_files(max_files)
+            # Always perform a full directory scan to discover all files
+            scan_type = "initial" if self._is_first_scan else "full"
+            self.logger.info(f"Performing {scan_type} directory scan to discover all files...")
+            scan_result = self.scan_once(directories)
             
-            # If no pending files in database, perform a scan to discover new files
-            if not pending_files:
-                self.logger.info("No pending files in database, performing initial scan...")
-                scan_result = self.scan_once(directories)
-                pending_files = scan_result.new_files[:max_files]
-                self.logger.info(f"Initial scan found {len(pending_files)} new files")
-            else:
-                self.logger.info(f"Found {len(pending_files)} files for processing from database")
+            # Get all files that need processing (new + modified + pending from database)
+            all_pending_files = []
+            
+            # Add new files from scan
+            all_pending_files.extend(scan_result.new_files)
+            
+            # Add modified files from scan
+            all_pending_files.extend(scan_result.modified_files)
+            
+            # Also get any existing pending/failed files from database that weren't found in scan
+            db_pending_files = self.file_tracker.get_pending_files(max_files)
+            db_file_paths = {f.file_path for f in db_pending_files}
+            scan_file_paths = {f.file_path for f in all_pending_files}
+            
+            # Add database files that weren't found in current scan (might be in different directories)
+            for db_file in db_pending_files:
+                if db_file.file_path not in scan_file_paths:
+                    all_pending_files.append(db_file)
+            
+            # Limit to max_files and return
+            pending_files = all_pending_files[:max_files]
+            
+            self.logger.info(f"{scan_type.capitalize()} scan completed: {len(scan_result.new_files)} new files, "
+                           f"{len(scan_result.modified_files)} modified files, "
+                           f"{len(pending_files)} total files for processing")
+            
+            # Mark that we've completed the first scan
+            if self._is_first_scan:
+                self._is_first_scan = False
             
             return pending_files
             

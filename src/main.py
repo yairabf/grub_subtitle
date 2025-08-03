@@ -50,13 +50,13 @@ def main():
         
         print(f"🔍 Validating Hebrew subtitle: {subtitle_file}")
         if args.fix:
-            success = service.validate_and_fix_hebrew_subtitle(subtitle_file)
+            success = service.validate_and_fix_subtitle(subtitle_file)
             if success:
                 print("✅ Validation and fix completed successfully!")
             else:
                 print("❌ Validation and fix failed!")
         else:
-            validation_result = service.validate_hebrew_subtitle(subtitle_file)
+            validation_result = service.validate_subtitle(subtitle_file)
             if validation_result['is_valid']:
                 print("✅ Hebrew subtitle is valid!")
             else:

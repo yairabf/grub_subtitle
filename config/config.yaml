@@ -102,8 +102,8 @@ service:
 
 # Processing settings (sensible defaults)
 processing:
-  chunk_size: 3000
-  max_blocks_per_chunk: 10
+  chunk_size: 8000
+  max_blocks_per_chunk: 30
   supported_video_formats: [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"]
   max_concurrent_processes: 3
   temp_directory: "./temp"

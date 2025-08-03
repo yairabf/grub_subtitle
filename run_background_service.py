@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Manual test script for Background Service with enhanced email notifications.
+Manual test script for Background Service.
 
-This script runs the background service manually to test the email notification system.
+This script runs the background service manually for testing.
 """
 
 import os
@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from services.background_service import BackgroundService, ServiceState
 from config.config_manager import ConfigManager
-from services.notification_service import NotificationService, NotificationType, NotificationChannel
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -29,7 +28,7 @@ def signal_handler(signum, frame):
 
 def main():
     """Main function to run the background service."""
-    print("🚀 Starting Background Service with Enhanced Email Notifications")
+    print("🚀 Starting Background Service")
     print("=" * 60)
     
     # Load environment variables
@@ -114,14 +113,12 @@ def main():
     service.add_state_callback(state_callback)
     
     print("✅ Service initialized successfully")
-    print("🔔 System and log notifications enabled")
     print("\n🚀 Starting service...")
     
     # Start the service
     if service.start():
         print("✅ Service started successfully!")
         print("\n📋 Service is now running. Press Ctrl+C to stop.")
-        print("📋 Check logs and system notifications!")
         
         # Monitor service for a while
         try:
@@ -135,23 +132,6 @@ def main():
                           f"Active Workers: {stats['active_workers']} | "
                           f"Completed: {stats['tasks_completed']} | "
                           f"Failed: {stats['tasks_failed']}")
-                    
-                    # Send a test batch completion notification every 2 minutes
-                    if int(time.time()) % 120 == 0:
-                        print("📋 Sending test batch completion notification...")
-                        service.send_batch_completion_notification({
-                            'total_files': 5,
-                            'successful': 4,
-                            'failed': 1,
-                            'skipped': 0,
-                            'processing_time': '2 minutes 30 seconds',
-                            'failed_files': [{'file': 'test_movie_2.mkv', 'error': 'Network timeout'}]
-                        })
-                    
-                    # Send a test daily summary every 5 minutes
-                    if int(time.time()) % 300 == 0:
-                        print("📋 Sending test daily summary notification...")
-                        service.send_daily_summary_notification()
         
         except KeyboardInterrupt:
             print("\n🛑 Keyboard interrupt received, stopping service...")
@@ -179,7 +159,6 @@ def main():
     print(f"   - Queue Size: {final_stats['queue_size']}")
     
     print("\n🎉 Background service test completed!")
-    print("📋 Check logs for all the notifications that were sent!")
 
 if __name__ == "__main__":
     main() 

@@ -61,7 +61,7 @@ class TranslationService:
         
         return blocks
 
-    def split_subtitle_content(self, content, max_chunk_size=4000, max_blocks_per_chunk=15):
+    def split_subtitle_content(self, content, max_chunk_size=8000, max_blocks_per_chunk=30):
         """Split subtitle content into chunks that preserve complete subtitle blocks."""
         blocks = self.parse_srt_blocks(content)
         chunks = []
@@ -142,7 +142,7 @@ class TranslationService:
         
         return chunks
 
-    def translate_subtitle(self, input_path, output_path, chunk_size=4000, max_blocks_per_chunk=15):
+    def translate_subtitle(self, input_path, output_path, chunk_size=8000, max_blocks_per_chunk=30):
         """Translate subtitle file using OpenAI."""
         target_language_name = self.language_names.get(self.target_language, self.target_language)
         

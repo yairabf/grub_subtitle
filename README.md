@@ -102,18 +102,18 @@ See `docker/homelab-examples/README.md` for platform-specific instructions.
 #### Setup
 
 1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+```
 
 2. **Create Environment File**:
    Create a `.env` file in the project root:
    ```bash
-   OPENSUBTITLES_USERNAME=your_opensubtitles_username
-   OPENSUBTITLES_PASSWORD=your_opensubtitles_password
-   OPENAI_API_KEY=your_openai_api_key
+OPENSUBTITLES_USERNAME=your_opensubtitles_username
+OPENSUBTITLES_PASSWORD=your_opensubtitles_password
+OPENAI_API_KEY=your_openai_api_key
    DIRECTORY_PATH=/path/to/your/video/directory
-   ```
+```
 
 3. **Configure Service**:
    Edit `config/config.yaml` to customize service settings.
