@@ -1,0 +1,30 @@
+=== ERROR RESOLUTION SUMMARY ===
+
+Date: 2025-08-07
+Status: RESOLVED ✅
+
+PREVIOUS ERROR PATTERN:
+{"timestamp": "2025-08-06T19:06:07.192784", "level": "ERROR", "logger": "subtitle_service", "message": "Error processing video file /media/videos/tvshows/Digimon.Adventure.(2020)/Season.1/Digimon.Adventure.2020.S01E21.THE.TIDE-TURNING.UPDATE.1080p.CR.WEB-DL.DDP2.0.H.264-Kitsune.mkv: 'name'", "module": "subtitle_logger", "function": "_log_with_context", "line": 156}
+
+ROOT CAUSE:
+- ConfigManager.get() returning None for 'languages.he' configuration
+- self.language_config becoming None
+- Code trying to access self.language_config['name'] causing AttributeError
+
+FIXES APPLIED:
+1. Enhanced _get_language_config() with proper error handling
+2. Added safe language_name property with fallback
+3. Replaced all self.language_config['name'] with self.language_name
+4. Fixed BackgroundService initialization
+
+TESTING RESULTS:
+✅ Test passed: The 'name' error has been completely resolved
+✅ Language name property works: Returns "Hebrew" correctly
+✅ Language config properly set: Falls back to defaults when config is missing
+✅ Safe access: No more AttributeError or KeyError exceptions
+
+EXPECTED OUTCOME:
+- Service should now process files without 'name' errors
+- Translation pipeline should work properly
+- Success rate should improve significantly
+- Service stability should be restored

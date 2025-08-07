@@ -62,14 +62,24 @@ class SubtitleService:
             "zh": ["chi", "zh"],  # Chinese
             "ar": ["ara", "ar"],  # Arabic
         }
+    
+    @property
+    def language_name(self) -> str:
+        """Safely get the language name with fallback."""
+        if self.language_config and isinstance(self.language_config, dict):
+            return self.language_config.get('name', 'Unknown')
+        return 'Unknown'
 
     def _get_language_config(self):
         """Get language configuration from config manager or use defaults."""
         if self.config_manager:
             try:
-                return self.config_manager.get(f'languages.{self.target_language}', {})
-            except:
-                pass
+                config = self.config_manager.get(f'languages.{self.target_language}', {})
+                # Ensure we have a valid dictionary with required keys
+                if config and isinstance(config, dict) and 'name' in config:
+                    return config
+            except Exception as e:
+                print(f"Warning: Could not get language config from config manager: {e}")
         
         # Default language configurations
         default_configs = {
@@ -148,17 +158,17 @@ class SubtitleService:
         # Get language codes to try for target language
         target_codes = self.language_codes.get(self.target_language, [self.target_language])
         
-        print(f"🔍 Aggressively searching for {self.language_config['name']} subtitles for: {show_name}")
+        print(f"🔍 Aggressively searching for {self.language_name} subtitles for: {show_name}")
         
         for lang_code in target_codes:
-            print(f"  Trying {self.language_config['name']} code: {lang_code}")
+            print(f"  Trying {self.language_name} code: {lang_code}")
             
             # Try hash search first (most accurate)
             if file_hash:
                 print(f"    Searching by hash with {lang_code}...")
                 search_results = self.opensubtitles.search_subtitles_by_hash(file_hash, lang_code)
                 if search_results:
-                    print(f"    ✅ Found {len(search_results)} {self.language_config['name']} subtitles by hash with {lang_code}")
+                    print(f"    ✅ Found {len(search_results)} {self.language_name} subtitles by hash with {lang_code}")
                     # Return the result with highest download count
                     best_result = max(search_results, key=lambda x: x.get('attributes', {}).get('download_count', 0))
                     print(f"    Selected subtitle with {best_result.get('attributes', {}).get('download_count', 0)} downloads")
@@ -188,7 +198,7 @@ class SubtitleService:
                         matching_results.append(result)
                 
                 if matching_results:
-                    print(f"    ✅ Found {len(matching_results)} {self.language_config['name']} subtitles by query with {lang_code}")
+                    print(f"    ✅ Found {len(matching_results)} {self.language_name} subtitles by query with {lang_code}")
                     # Return the result with highest download count
                     best_result = max(matching_results, key=lambda x: x.get('attributes', {}).get('download_count', 0))
                     print(f"    Selected subtitle with {best_result.get('attributes', {}).get('download_count', 0)} downloads")
@@ -198,7 +208,7 @@ class SubtitleService:
             else:
                 print(f"    ❌ No results by query with {lang_code}")
         
-        print(f"    ❌ No {self.language_config['name']} subtitles found with any language code")
+        print(f"    ❌ No {self.language_name} subtitles found with any language code")
         return None
 
     def search_subtitle_aggressive_english(self, video_path, show_name, season, episode):
@@ -277,10 +287,10 @@ class SubtitleService:
             # Get the file_id from the first file in the files array
             file_id = hebrew_subtitle[0].get('attributes', {}).get('files', [{}])[0].get('file_id')
             if file_id and self.opensubtitles.download_subtitle(file_id, output_path):
-                print(f"✅ Successfully downloaded {self.language_config['name']} subtitle for {episode_info['title']}")
+                print(f"✅ Successfully downloaded {self.language_name} subtitle for {episode_info['title']}")
                 return True
             else:
-                print(f"❌ Failed to download {self.language_config['name']} subtitle for {episode_info['title']}")
+                print(f"❌ Failed to download {self.language_name} subtitle for {episode_info['title']}")
 
         # Fallback: Check if English subtitle already exists
         existing_eng_path = os.path.join(episode_dir, f"{base_name}.eng.srt")
@@ -289,11 +299,11 @@ class SubtitleService:
             # Translate existing English subtitle to Hebrew
             output_path = os.path.join(episode_dir, f"{base_name}.{self.target_language}.srt")
             if self.translation_service.translate_subtitle(existing_eng_path, output_path):
-                print(f"✅ Translated existing English subtitle to {self.language_config['name']} for {episode_info['title']}")
+                print(f"✅ Translated existing English subtitle to {self.language_name} for {episode_info['title']}")
                 return True
         else:
             # Last resort: Try English and translate
-            print(f"🔍 No {self.language_config['name']} subtitle found, trying English subtitle...")
+            print(f"🔍 No {self.language_name} subtitle found, trying English subtitle...")
             english_subtitle = self.search_subtitle(episode_info, 'eng')
             if english_subtitle and len(english_subtitle) > 0:
                 temp_path = os.path.join(episode_dir, f"{base_name}.eng.srt")
@@ -304,7 +314,7 @@ class SubtitleService:
                     # Translate to Hebrew
                     output_path = os.path.join(episode_dir, f"{base_name}.{self.target_language}.srt")
                     if self.translation_service.translate_subtitle(temp_path, output_path):
-                        print(f"✅ Translated subtitle to {self.language_config['name']} for {episode_info['title']}")
+                        print(f"✅ Translated subtitle to {self.language_name} for {episode_info['title']}")
                         # Clean up temporary English subtitle
                         os.remove(temp_path)
                         return True
@@ -348,11 +358,11 @@ class SubtitleService:
         # 1. Check if there is a Hebrew subtitle - if so move to next file
         hebrew_subtitle_path = self._find_existing_subtitle(video_path, self.target_language, output_dir)
         if hebrew_subtitle_path:
-            print(f"✅ {self.language_config['name']} subtitle already exists: {hebrew_subtitle_path}")
+            print(f"✅ {self.language_name} subtitle already exists: {hebrew_subtitle_path}")
             return True
         
         # 2. If missing Hebrew subtitle, try to download Hebrew subtitle. If download was successful, move to next file
-        print(f"🔍 Searching for {self.language_config['name']} subtitle to download...")
+        print(f"🔍 Searching for {self.language_name} subtitle to download...")
         hebrew_subtitle = self.search_subtitle_aggressive_target_language(episode_info)
         
         if hebrew_subtitle:
@@ -363,17 +373,17 @@ class SubtitleService:
             
             # Check if it's actually Hebrew
             if subtitle_lang in ['heb', 'he', 'hebrew']:
-                print(f"✅ Confirmed {self.language_config['name']} subtitle")
+                print(f"✅ Confirmed {self.language_name} subtitle")
                 if self._download_subtitle(hebrew_subtitle[0], video_path, output_dir, force_language=self.target_language):
-                    print(f"✅ Successfully downloaded {self.language_config['name']} subtitle")
+                    print(f"✅ Successfully downloaded {self.language_name} subtitle")
                     return True
                 else:
-                    print(f"❌ Failed to download {self.language_config['name']} subtitle, will try English")
+                    print(f"❌ Failed to download {self.language_name} subtitle, will try English")
             else:
-                print(f"❌ Found subtitle but it's not {self.language_config['name']} (language: {subtitle_lang}), will try English")
+                print(f"❌ Found subtitle but it's not {self.language_name} (language: {subtitle_lang}), will try English")
         
         # 3. If there is no Hebrew sub to download, check for existing source language subtitle
-        print(f"🔍 No {self.language_config['name']} subtitle available, checking for existing source language subtitle...")
+        print(f"🔍 No {self.language_name} subtitle available, checking for existing source language subtitle...")
         
         # Get source language from config or default to English
         source_language = "en"  # Default
@@ -387,12 +397,12 @@ class SubtitleService:
         source_subtitle_path = self._find_existing_subtitle(video_path, source_language, output_dir)
         if source_subtitle_path:
             print(f"✅ {source_language.upper()} subtitle already exists: {source_subtitle_path}")
-            print(f"🔄 Translating existing {source_language.upper()} subtitle to {self.language_config['name']}...")
+            print(f"🔄 Translating existing {source_language.upper()} subtitle to {self.language_name}...")
             if self._translate_existing_subtitle(source_subtitle_path, output_dir):
-                print(f"✅ Successfully translated existing {source_language.upper()} subtitle to {self.language_config['name']}")
+                print(f"✅ Successfully translated existing {source_language.upper()} subtitle to {self.language_name}")
                 return True
             else:
-                print(f"❌ Failed to translate existing {source_language.upper()} subtitle to {self.language_config['name']}")
+                print(f"❌ Failed to translate existing {source_language.upper()} subtitle to {self.language_name}")
                 return False
         
         # Also check for English subtitle as fallback (in case source language is different)
@@ -400,12 +410,12 @@ class SubtitleService:
             english_subtitle_path = self._find_existing_subtitle(video_path, 'eng', output_dir)
             if english_subtitle_path:
                 print(f"✅ English subtitle already exists: {english_subtitle_path}")
-                print(f"🔄 Translating existing English subtitle to {self.language_config['name']}...")
+                print(f"🔄 Translating existing English subtitle to {self.language_name}...")
                 if self._translate_existing_subtitle(english_subtitle_path, output_dir):
-                    print(f"✅ Successfully translated existing English subtitle to {self.language_config['name']}")
+                    print(f"✅ Successfully translated existing English subtitle to {self.language_name}")
                     return True
                 else:
-                    print(f"❌ Failed to translate existing English subtitle to {self.language_config['name']}")
+                    print(f"❌ Failed to translate existing English subtitle to {self.language_name}")
                     return False
         
         # If no existing source subtitle, search and download
@@ -422,12 +432,12 @@ class SubtitleService:
                 # 4. After download the English translate it
                 downloaded_english_path = self._find_existing_subtitle(video_path, 'eng', output_dir)
                 if downloaded_english_path:
-                    print(f"🔄 Translating downloaded English subtitle to {self.language_config['name']}...")
+                    print(f"🔄 Translating downloaded English subtitle to {self.language_name}...")
                     if self._translate_existing_subtitle(downloaded_english_path, output_dir):
-                        print(f"✅ Successfully translated English subtitle to {self.language_config['name']}")
+                        print(f"✅ Successfully translated English subtitle to {self.language_name}")
                         return True
                     else:
-                        print(f"❌ Failed to translate English subtitle to {self.language_config['name']}")
+                        print(f"❌ Failed to translate English subtitle to {self.language_name}")
                         return False
                 else:
                     print(f"❌ Could not locate downloaded English subtitle file")
@@ -568,11 +578,11 @@ class SubtitleService:
                 # If this was supposed to be Hebrew, verify the content
                 if force_language == self.target_language:
                     if not self._verify_hebrew_content(str(output_path)):
-                        print(f"❌ Downloaded file does not contain {self.language_config['name']} text, removing it")
+                        print(f"❌ Downloaded file does not contain {self.language_name} text, removing it")
                         output_path.unlink()  # Delete the file
                         return False
                     else:
-                        print(f"✅ Verified {self.language_config['name']} content in downloaded file")
+                        print(f"✅ Verified {self.language_name} content in downloaded file")
                 
                 return True
             else:
@@ -814,10 +824,10 @@ class SubtitleService:
         hebrew_subtitle_path = os.path.join(episode_dir, f"{base_name}.{self.target_language}.srt")
         
         if os.path.exists(hebrew_subtitle_path):
-            print(f"\n🔍 Validating generated {self.language_config['name']} subtitle...")
+            print(f"\n🔍 Validating generated {self.language_name} subtitle...")
             return self.validate_and_fix_subtitle(hebrew_subtitle_path)
         else:
-            print(f"❌ No {self.language_config['name']} subtitle was generated for validation")
+            print(f"❌ No {self.language_name} subtitle was generated for validation")
             return False
 
     def process_video_file_with_validation(self, video_path: str, output_dir=None) -> bool:
@@ -838,10 +848,10 @@ class SubtitleService:
             hebrew_subtitle_path = self._find_existing_subtitle(video_path_obj, self.target_language, output_dir)
             
             if hebrew_subtitle_path:
-                print(f"\n🔍 Validating generated {self.language_config['name']} subtitle...")
+                print(f"\n🔍 Validating generated {self.language_name} subtitle...")
                 return self.validate_and_fix_subtitle(str(hebrew_subtitle_path))
             else:
-                print(f"❌ No {self.language_config['name']} subtitle was generated for validation")
+                print(f"❌ No {self.language_name} subtitle was generated for validation")
                 return False
         
         return False 

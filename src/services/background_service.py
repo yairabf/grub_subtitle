@@ -126,6 +126,9 @@ class BackgroundService:
         
         # Initialize services
         self.subtitle_service = SubtitleService(
+            opensubtitles_username=None,  # Will be loaded from environment
+            opensubtitles_password=None,  # Will be loaded from environment
+            openai_api_key=None,  # Will be loaded from environment
             target_language=target_language,
             config_manager=self.config_manager
         )
