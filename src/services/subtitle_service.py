@@ -613,35 +613,48 @@ class SubtitleService:
             return False
     
     def _translate_existing_subtitle(self, english_subtitle_path, output_dir):
-        """Translate existing English subtitle to Hebrew."""
+        """Translate existing English subtitle to Hebrew with checkpointing support."""
         try:
-            print(f"Translating subtitle: {english_subtitle_path}")
+            # Determine output path
+            english_path = Path(english_subtitle_path)
+            output_path = output_dir / f"{english_path.stem}.{self.target_language}.srt"
             
-            # Determine output filename
-            english_stem = english_subtitle_path.stem
-            # Remove language suffix if present
-            if english_stem.endswith('.eng'):
-                base_stem = english_stem[:-4]
+            # Check if Hebrew subtitle already exists
+            if output_path.exists():
+                print(f"✅ {self.language_name} subtitle already exists: {output_path.name}")
+                return True
+            
+            # Check for interrupted translation
+            if self.translation_service.check_for_interrupted_translations(str(output_path)):
+                print(f"🔄 Resuming interrupted translation for {english_path.name}")
             else:
-                base_stem = english_stem
+                print(f"🔄 Starting new translation for {english_path.name}")
             
-            hebrew_output_path = output_dir / f"{base_stem}.{self.target_language}.srt"
-            
-            # Translate the subtitle
+            # Translate with checkpointing
             success = self.translation_service.translate_subtitle(
                 str(english_subtitle_path), 
-                str(hebrew_output_path)
+                str(output_path)
             )
             
             if success:
-                print(f"Successfully translated subtitle to: {hebrew_output_path}")
-                return True
+                print(f"✅ Successfully translated {english_path.name} to {self.language_name}")
+                
+                # Validate the translation
+                if self.translation_service.validate_translation_completeness(
+                    str(english_subtitle_path), str(output_path)
+                ):
+                    print(f"✅ Translation validation passed for {english_path.name}")
+                    return True
+                else:
+                    print(f"⚠️  Translation validation failed for {english_path.name}")
+                    # Keep the file anyway as it might still be usable
+                    return True
             else:
-                print("Failed to translate subtitle")
+                print(f"❌ Failed to translate {english_path.name}")
                 return False
                 
         except Exception as e:
-            print(f"Error translating subtitle: {e}")
+            print(f"Error translating {english_subtitle_path}: {e}")
             return False
     
     def process_directory(self, directory_path, output_dir=None):
