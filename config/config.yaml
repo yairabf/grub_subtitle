@@ -9,6 +9,9 @@ api:
   
   openai:
     api_key: ${OPENAI_API_KEY}
+    model: gpt-4o-mini  # Model defined in config only
+    temperature: 0.3
+    max_tokens: 4000
 
 # Translation Settings
 translation:

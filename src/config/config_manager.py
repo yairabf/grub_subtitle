@@ -146,7 +146,7 @@ class ConfigManager:
                 },
                 'openai': {
                     'api_key': '${OPENAI_API_KEY}',
-                    'model': 'gpt-3.5-turbo',
+                    'model': 'gpt-4o-mini',  # Model defined in config only
                     'temperature': 0.3,
                     'max_tokens': 4000,
                     'timeout': 60,

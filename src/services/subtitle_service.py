@@ -38,7 +38,7 @@ class SubtitleService:
     def __init__(self, opensubtitles_username=None, opensubtitles_password=None, openai_api_key=None, target_language="he", config_manager=None):
         load_dotenv()
         self.opensubtitles = OpenSubtitlesAPI(opensubtitles_username, opensubtitles_password)
-        self.translation_service = TranslationService()
+        self.translation_service = TranslationService(config_manager=config_manager)
         self.target_language = target_language
         self.config_manager = config_manager
         

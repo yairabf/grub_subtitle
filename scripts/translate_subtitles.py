@@ -90,7 +90,11 @@ def main():
         print("Please set your OpenAI API key in the .env file")
         sys.exit(1)
     
-    translation_service = TranslationService()
+    # Load configuration
+    from src.config.config_manager import ConfigManager
+    config_manager = ConfigManager()
+    
+    translation_service = TranslationService(config_manager=config_manager)
     
     if args.file:
         # Translate a single file

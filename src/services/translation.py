@@ -7,9 +7,10 @@ import json
 import hashlib
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+from config.model_config import ModelConfig
 
 class TranslationService:
-    def __init__(self, target_language="he", source_language="en"):
+    def __init__(self, target_language="he", source_language="en", config_manager=None):
         load_dotenv()
         api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
@@ -17,6 +18,7 @@ class TranslationService:
         
         self.target_language = target_language
         self.source_language = source_language
+        self.config_manager = config_manager
         
         # Language names for translation prompts
         self.language_names = {
@@ -286,8 +288,11 @@ class TranslationService:
             
             for attempt in range(max_retries):
                 try:
+                    # Get model from centralized configuration
+                    model = ModelConfig.get_model(self.config_manager)
+                    
                     response = self.client.chat.completions.create(
-                        model="gpt-3.5-turbo",
+                        model=model,
                         messages=[
                             {"role": "system", "content": f"""You are a subtitle translator. Translate the following subtitle content to {target_language_name}, maintaining the exact same format and timing. 
 

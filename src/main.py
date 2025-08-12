@@ -34,11 +34,16 @@ def main():
     # Get target language from environment or config
     target_language = os.getenv('TARGET_LANGUAGE', 'he')
     
+    # Load configuration
+    from config.config_manager import ConfigManager
+    config_manager = ConfigManager()
+    
     service = SubtitleService(
         opensubtitles_username=opensubtitles_username, 
         opensubtitles_password=opensubtitles_password, 
         openai_api_key=openai_api_key,
-        target_language=target_language
+        target_language=target_language,
+        config_manager=config_manager
     )
     
     # Handle validation-only mode
